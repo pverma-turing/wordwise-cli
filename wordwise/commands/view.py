@@ -27,26 +27,48 @@ class ViewCommand(Command):
 
     def add_arguments(self, parser):
         """Add command-specific arguments."""
-        # No additional arguments needed for the basic view command
-        pass
+        # Add optional --status flag with valid choices
+        parser.add_argument(
+            "--status",
+            choices=["to-review", "learned"],
+            help="Filter words by learning status ('to-review' or 'learned')"
+        )
 
     def execute(self, args):
         """Execute the view command."""
         conn = get_connection()
         cursor = conn.cursor()
-        # Query all words from the database
-        cursor.execute('SELECT word, note, status, date_added FROM words ORDER BY date_added DESC')
+
+        # Build the query based on the status filter
+        query = 'SELECT word, note, status, date_added FROM words'
+        params = []
+
+        if args.status:
+            query += ' WHERE status = ?'
+            params.append(args.status)
+
+        query += ' ORDER BY date_added DESC'
+
+        # Query words from the database with potential filtering
+        cursor.execute(query, params)
         rows = cursor.fetchall()
 
         # Close connection
         conn.close()
 
         if not rows:
-            print("No saved words found.")
+            # Customize message based on whether filtering was applied
+            if args.status:
+                print(f"No words with status '{args.status}' found.")
+            else:
+                print("No saved words found.")
             return
 
-        # Print header
-        print("\n=== Saved Words ===\n")
+        # Print header with status information if filtering was applied
+        if args.status:
+            print(f"\n=== Saved Words (Status: {args.status}) ===\n")
+        else:
+            print("\n=== Saved Words ===\n")
 
         # Determine maximum width for each column
         max_word_len = max(len(row[0]) for row in rows)
@@ -78,4 +100,8 @@ class ViewCommand(Command):
 
             print(format_str.format(word, note_display, status, display_date))
 
-        print(f"\nTotal words: {len(rows)}")
+        # Print summary with filtering information if applicable
+        if args.status:
+            print(f"\nTotal words with status '{args.status}': {len(rows)}")
+        else:
+            print(f"\nTotal words: {len(rows)}")
