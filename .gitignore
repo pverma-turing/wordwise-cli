@@ -1,4 +1,5 @@
 .idea
+.DS_Store
 wordwise/.DS_Store
 wordwise/__pycache__/
 wordwise/commands/__pycache__/
