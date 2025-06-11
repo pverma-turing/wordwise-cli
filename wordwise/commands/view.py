@@ -22,7 +22,7 @@ class ViewCommand(Command):
     @property
     def description(self):
         """Return the command description."""
-        return "Display saved words from the database with optional filtering and sorting"
+        return "Display saved words from the database with optional filtering, sorting, and searching"
 
     def add_arguments(self, parser):
         """Add command-specific arguments."""
@@ -50,6 +50,12 @@ class ViewCommand(Command):
             choices=["word", "date_added", "status"],
             default="date_added",
             help="Field to sort results by (default: date_added)"
+        )
+
+        # Add search option
+        parser.add_argument(
+            "--search",
+            help="Search for words containing the specified text (case-insensitive)"
         )
 
     def validate_date_format(self, date_str, arg_name):
@@ -97,11 +103,17 @@ class ViewCommand(Command):
             conditions.append('date_added <= ?')
             params.append(to_datetime)
 
+        # Add search filter if provided
+        if args.search is not None:
+            conditions.append('word LIKE ?')
+            # Add wildcards for partial matching
+            params.append(f'%{args.search}%')
+
         # Add WHERE clause if any conditions exist
         if conditions:
             query += ' WHERE ' + ' AND '.join(conditions)
 
-        # Add ORDER BY clause based on sort option (default to date_added in ascending order)
+        # Add ORDER BY clause based on sort option
         query += f' ORDER BY {args.sort_by} ASC'
 
         # Execute the query with parameters
@@ -114,8 +126,10 @@ class ViewCommand(Command):
         # Handle case where no matching words are found
         if not rows:
             filter_desc = []
+            if args.search is not None:
+                filter_desc.append(f"containing '{args.search}'")
             if args.status:
-                filter_desc.append(f"status '{args.status}'")
+                filter_desc.append(f"with status '{args.status}'")
             if args.from_date:
                 filter_desc.append(f"added on or after {args.from_date}")
             if args.to_date:
@@ -127,11 +141,18 @@ class ViewCommand(Command):
                 print("No saved words found.")
             return
 
-        # Build header based on active filters and sort
+        # Build header based on active filters, search, and sort
         header_parts = ["=== Saved Words"]
+
+        # Add search information to header if search was used
+        if args.search is not None:
+            header_parts.append(f"Containing: '{args.search}'")
+
+        # Add status filter to header
         if args.status:
             header_parts.append(f"Status: {args.status}")
 
+        # Add date range to header
         date_range = []
         if args.from_date:
             date_range.append(f"From: {args.from_date}")
@@ -189,6 +210,8 @@ class ViewCommand(Command):
         total_msg = f"\nTotal words"
         filter_desc = []
 
+        if args.search is not None:
+            filter_desc.append(f"containing '{args.search}'")
         if args.status:
             filter_desc.append(f"with status '{args.status}'")
         if args.from_date or args.to_date:
