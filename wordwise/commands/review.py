@@ -38,47 +38,53 @@ class ReviewCommand(Command):
             default=None
         )
 
+    def _has_column(self, cursor, table_name, column_name):
+        """Check if the given column exists in the specified table."""
+        cursor.execute(f"PRAGMA table_info({table_name})")
+        columns = [info[1] for info in cursor.fetchall()]
+        return column_name in columns
+
     def execute(self, args):
         """Execute the review command with the provided arguments."""
         # Connect to the database
+        conn = None
         try:
             conn = get_connection()
             cursor = conn.cursor()
 
             # Build the query based on the arguments
-            query = "SELECT word, note, date_added, status FROM words"
+            query_parts = ["SELECT word, note, date_added, status FROM words"]
+            conditions = []
             params = []
 
-            conditions = []
+            # Check if the next_review_date column exists
+            has_next_review_date = self._has_column(cursor, "words", "next_review_date")
+
             if args.due_only:
                 today = datetime.date.today().isoformat()
-                # Check if next_review_date exists in the schema, if not use status
-                try:
-                    cursor.execute("PRAGMA table_info(words)")
-                    columns = [info[1] for info in cursor.fetchall()]
 
-                    if "next_review_date" in columns:
-                        conditions.append("(next_review_date <= ? OR next_review_date IS NULL)")
-                        params.append(today)
-                    else:
-                        # Fallback to status for compatibility
-                        conditions.append("status = 'to-review'")
-                except sqlite3.Error:
-                    # If error, just use status as fallback
+                if has_next_review_date:
+                    # Filter by next_review_date when available
+                    conditions.append("(next_review_date IS NOT NULL AND next_review_date <= ?)")
+                    params.append(today)
+                else:
+                    # Fallback to status for backwards compatibility
                     conditions.append("status = 'to-review'")
 
+            # Apply WHERE conditions if any exist
             if conditions:
-                query += " WHERE " + " AND ".join(conditions)
+                query_parts.append("WHERE " + " AND ".join(conditions))
 
             # Add limit if specified
             if args.limit is not None:
                 if args.limit <= 0:
                     print("Error: Limit must be a positive integer.")
                     sys.exit(1)
-                query += " LIMIT ?"
+                query_parts.append("LIMIT ?")
                 params.append(args.limit)
 
-            # Execute the query
+            # Build and execute the final query
+            query = " ".join(query_parts)
             cursor.execute(query, params)
             words = cursor.fetchall()
 
@@ -117,7 +123,7 @@ class ReviewCommand(Command):
 
         except sqlite3.Error as e:
             print(f"Database error: {e}")
-            return
+            sys.exit(1)
         finally:
             if conn:
                 conn.close()
