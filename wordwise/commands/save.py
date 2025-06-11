@@ -14,18 +14,24 @@ class SaveCommand(Command):
 
     @property
     def name(self):
+        """Return the command name."""
         return "save"
 
     @property
     def description(self):
-        return "Save a word to your personal collection"
+        """Return the command description."""
+        return "Save a word for future review"
 
     def add_arguments(self, parser):
-        parser.add_argument("word", help="The word to save")
+        """Add command-specific arguments."""
+        """Add command-specific arguments."""
+        parser.add_argument(
+            "word",
+            help="The word to save"
+        )
         parser.add_argument(
             "--note", "-n",
-            help="Optional note about the word",
-            default=None
+            help="Optional note to associate with the word"
         )
 
     def execute(self, args):
