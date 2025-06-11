@@ -15,7 +15,7 @@ class ReviewCommand(Command):
 
     This command allows users to review words they have saved in the database,
     with options to filter by due date, limit the number of words, resume
-    incomplete review sessions, and shuffle the review order.
+    incomplete review sessions, shuffle the review order, and reset review results.
     """
 
     @property
@@ -48,6 +48,11 @@ class ReviewCommand(Command):
             "--shuffle",
             action="store_true",
             help="Randomize the order of words for review"
+        )
+        parser.add_argument(
+            "--reset",
+            action="store_true",
+            help="Reset last_review_result to NULL for all selected words before review"
         )
 
     def _has_column(self, cursor, table_name, column_name):
@@ -88,6 +93,50 @@ class ReviewCommand(Command):
             print(f"Warning: Could not update review result for '{word}': {e}")
             return False
 
+    def _build_query_conditions(self, args, has_next_review_date, has_last_review_result):
+        """Build query conditions based on command arguments."""
+        conditions = []
+        params = []
+
+        if args.due_only:
+            today = datetime.date.today().isoformat()
+
+            if has_next_review_date:
+                # Filter by next_review_date when available
+                conditions.append("(next_review_date IS NOT NULL AND next_review_date <= ?)")
+                params.append(today)
+            else:
+                # Fallback to status for backwards compatibility
+                conditions.append("status = 'to-review'")
+
+        # Add resume condition if specified and not resetting
+        if args.resume and not args.reset and has_last_review_result:
+            conditions.append("(last_review_result IS NULL)")
+
+        return conditions, params
+
+    def _reset_review_results(self, conn, cursor, args, has_last_review_result):
+        """Reset last_review_result to NULL for words matching the current filters."""
+        if not args.reset or not has_last_review_result:
+            return 0  # Nothing to reset
+
+        # Build conditions for resetting (same as for selecting, but without resume filter)
+        has_next_review_date = self._has_column(cursor, "words", "next_review_date")
+        conditions, params = self._build_query_conditions(args, has_next_review_date, False)
+
+        # Build and execute the reset query
+        reset_query = "UPDATE words SET last_review_result = NULL"
+        if conditions:
+            reset_query += " WHERE " + " AND ".join(conditions)
+
+        try:
+            cursor.execute(reset_query, params)
+            conn.commit()
+            return cursor.rowcount
+        except sqlite3.Error as e:
+            print(f"Warning: Could not reset review results: {e}")
+            return 0
+
     def execute(self, args):
         """Execute the review command with the provided arguments."""
         # Connect to the database
@@ -98,32 +147,25 @@ class ReviewCommand(Command):
             cursor = conn.cursor()
 
             # Ensure the last_review_result column exists
-            column_added = self._ensure_last_review_result_column(cursor)
-            if column_added:
+            has_last_review_result = self._ensure_last_review_result_column(cursor)
+            if has_last_review_result:
                 conn.commit()
 
-            # Build the query based on the arguments
-            query_parts = ["SELECT word, note, date_added, status, rowid FROM words"]
-            conditions = []
-            params = []
+            # Reset review results if requested
+            if args.reset and has_last_review_result:
+                reset_count = self._reset_review_results(conn, cursor, args, has_last_review_result)
+                print(f"Reset review results for {reset_count} word(s).")
 
             # Check if the next_review_date column exists
             has_next_review_date = self._has_column(cursor, "words", "next_review_date")
 
-            if args.due_only:
-                today = datetime.date.today().isoformat()
+            # Build query conditions based on arguments
+            conditions, params = self._build_query_conditions(
+                args, has_next_review_date, has_last_review_result
+            )
 
-                if has_next_review_date:
-                    # Filter by next_review_date when available
-                    conditions.append("(next_review_date IS NOT NULL AND next_review_date <= ?)")
-                    params.append(today)
-                else:
-                    # Fallback to status for backwards compatibility
-                    conditions.append("status = 'to-review'")
-
-            # Add resume condition if specified
-            if args.resume and self._has_column(cursor, "words", "last_review_result"):
-                conditions.append("(last_review_result IS NULL)")
+            # Build the query based on the arguments
+            query_parts = ["SELECT word, note, date_added, status, rowid FROM words"]
 
             # Apply WHERE conditions if any exist
             if conditions:
@@ -144,7 +186,7 @@ class ReviewCommand(Command):
 
             # Check if there are any words to review
             if not words:
-                if args.resume:
+                if args.resume and not args.reset:
                     print("No new words to review. All available words have already been reviewed.")
                 elif args.due_only:
                     print("No words are due for review.")
@@ -161,7 +203,7 @@ class ReviewCommand(Command):
 
             # Display the number of words to review
             print(f"You have {len(words)} word(s) to review.")
-            if args.resume:
+            if args.resume and not args.reset:
                 print("Resuming from where you left off (skipping previously reviewed words).")
             if shuffle_message:
                 print(shuffle_message)
