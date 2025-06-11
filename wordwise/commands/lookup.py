@@ -8,6 +8,7 @@ from wordwise.data.dictionary import DICTIONARY
 from wordwise.utils.formatter import format_dictionary_entry
 from wordwise.utils.matching import find_similar_words
 
+
 @register_command
 class LookupCommand(Command):
     """Command to look up words in the dictionary."""
@@ -31,22 +32,37 @@ class LookupCommand(Command):
             action="store_true",
             default=False
         )
+        parser.add_argument(
+            "--synonyms", "-s",
+            help="Include synonyms in the output",
+            action="store_true",
+            default=False
+        )
 
     def execute(self, args):
         word = args.word.lower()
         show_examples = args.example
+        show_synonyms = args.synonyms
 
         # Case 1: Exact match
         if word in DICTIONARY:
             entry = DICTIONARY[word]
-            print(format_dictionary_entry(word, entry, show_examples=show_examples))
+            print(format_dictionary_entry(
+                word, entry,
+                show_examples=show_examples,
+                show_synonyms=show_synonyms
+            ))
             return 0
 
         # Try case-insensitive match first
         for dict_word in DICTIONARY:
             if dict_word.lower() == word:
                 entry = DICTIONARY[dict_word]
-                print(format_dictionary_entry(dict_word, entry, show_examples=show_examples))
+                print(format_dictionary_entry(
+                    dict_word, entry,
+                    show_examples=show_examples,
+                    show_synonyms=show_synonyms
+                ))
                 return 0
 
         # Case 2: No exact match, try to find similar words
@@ -58,7 +74,11 @@ class LookupCommand(Command):
 
             # If we have a suggestion, show it
             entry = DICTIONARY[first_suggestion]
-            print(format_dictionary_entry(first_suggestion, entry, show_examples=show_examples))
+            print(format_dictionary_entry(
+                first_suggestion, entry,
+                show_examples=show_examples,
+                show_synonyms=show_synonyms
+            ))
 
             # If we have more suggestions, show them too
             if len(similar_words) > 1:
