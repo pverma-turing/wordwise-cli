@@ -146,6 +146,27 @@ class ReviewCommand(Command):
             print(f"Warning: Could not reset review results: {e}")
             return 0
 
+    def _log_session(self, words_reviewed, correct_recalls, was_paused):
+        """Log the review session to a file."""
+        log_file = "review_sessions.log"
+        timestamp = datetime.datetime.now().isoformat()
+        status = "PAUSED" if was_paused else "COMPLETED"
+
+        log_entry = (
+            f"{timestamp} | "
+            f"Words reviewed: {words_reviewed} | "
+            f"Correct recalls: {correct_recalls} | "
+            f"Session status: {status}\n"
+        )
+
+        try:
+            with open(log_file, "a") as f:
+                f.write(log_entry)
+            return True
+        except (IOError, OSError) as e:
+            print(f"Warning: Could not write to session log: {e}")
+            return False
+
     def execute(self, args):
         """Execute the review command with the provided arguments."""
         # Connect to the database
@@ -224,6 +245,7 @@ class ReviewCommand(Command):
             total_words = len(words)
             correct_recalls = 0
             words_reviewed = 0  # Track how many words were reviewed before pausing
+            was_paused = False  # Track if session was paused
 
             # Display each word and wait for user input
             for i, word_row in enumerate(words, 1):
@@ -264,10 +286,17 @@ class ReviewCommand(Command):
                     # Give user option to continue or pause
                     pause_requested = self._check_for_pause()
                     if pause_requested:
+                        was_paused = True
                         print("\nSession paused. Your progress has been saved.")
                         print(f"You have reviewed {words_reviewed} of {total_words} words.")
                         print(f"You recalled {correct_recalls} out of {words_reviewed} words correctly.")
                         print("To continue reviewing remaining words, run the command again with --resume flag.")
+
+                        # Log the paused session
+                        log_success = self._log_session(words_reviewed, correct_recalls, was_paused)
+                        if log_success:
+                            print("Session logged to review_sessions.log")
+
                         return
                     print("\n" + "-" * 40)
 
@@ -275,6 +304,11 @@ class ReviewCommand(Command):
             print("\nReview complete! You recalled",
                   f"{correct_recalls} out of {total_words} words correctly.")
             print("Your results have been saved to the database.")
+
+            # Log the completed session
+            log_success = self._log_session(words_reviewed, correct_recalls, was_paused)
+            if log_success:
+                print("Session logged to review_sessions.log")
 
         except sqlite3.Error as e:
             print(f"Database error: {e}")
