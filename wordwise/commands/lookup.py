@@ -19,12 +19,13 @@ class LookupCommand(Command):
 
     @property
     def description(self):
-        return "Look up a word in the dictionary"
+        return "Look up one or more words in the dictionary"
 
     def add_arguments(self, parser):
         parser.add_argument(
-            "word",
-            help="The word to look up"
+            "words",
+            help="One or more words to look up",
+            nargs="+",  # Accept one or more positional arguments
         )
         parser.add_argument(
             "--example", "-e",
@@ -40,56 +41,73 @@ class LookupCommand(Command):
         )
 
     def execute(self, args):
-        word = args.word.lower()
         show_examples = args.example
         show_synonyms = args.synonyms
+        success = False  # Track if at least one word was found
 
-        # Case 1: Exact match
-        if word in DICTIONARY:
-            entry = DICTIONARY[word]
-            print(format_dictionary_entry(
-                word, entry,
-                show_examples=show_examples,
-                show_synonyms=show_synonyms
-            ))
-            return 0
+        # Process each word in the arguments
+        for i, input_word in enumerate(args.words):
+            # Add separator between multiple words
+            if i > 0:
+                print("\n" + "-" * 40)
 
-        # Try case-insensitive match first
-        for dict_word in DICTIONARY:
-            if dict_word.lower() == word:
-                entry = DICTIONARY[dict_word]
+            word = input_word.lower()
+
+            # Case 1: Exact match
+            if word in DICTIONARY:
+                entry = DICTIONARY[word]
                 print(format_dictionary_entry(
-                    dict_word, entry,
+                    word, entry,
                     show_examples=show_examples,
                     show_synonyms=show_synonyms
                 ))
-                return 0
+                success = True
+                continue
 
-        # Case 2: No exact match, try to find similar words
-        similar_words = find_similar_words(word, DICTIONARY.keys())
+            # Try case-insensitive match
+            found = False
+            for dict_word in DICTIONARY:
+                if dict_word.lower() == word:
+                    entry = DICTIONARY[dict_word]
+                    print(format_dictionary_entry(
+                        dict_word, entry,
+                        show_examples=show_examples,
+                        show_synonyms=show_synonyms
+                    ))
+                    success = True
+                    found = True
+                    break
 
-        if similar_words:
-            first_suggestion = similar_words[0]
-            print(f"Word '{args.word}' not found. Did you mean '{first_suggestion}'?")
+            if found:
+                continue
 
-            # If we have a suggestion, show it
-            entry = DICTIONARY[first_suggestion]
-            print(format_dictionary_entry(
-                first_suggestion, entry,
-                show_examples=show_examples,
-                show_synonyms=show_synonyms
-            ))
+            # Case 2: No exact match, try to find similar words
+            similar_words = find_similar_words(word, DICTIONARY.keys())
 
-            # If we have more suggestions, show them too
-            if len(similar_words) > 1:
-                other_suggestions = similar_words[1:][:3]  # Take up to 3 more suggestions
-                if other_suggestions:
-                    print("\nOther similar words:")
-                    for suggestion in other_suggestions:
-                        print(f"- {suggestion}")
+            if similar_words:
+                first_suggestion = similar_words[0]
+                print(f"Word '{input_word}' not found. Did you mean '{first_suggestion}'?")
 
-            return 0
+                # Show the suggested word
+                entry = DICTIONARY[first_suggestion]
+                print(format_dictionary_entry(
+                    first_suggestion, entry,
+                    show_examples=show_examples,
+                    show_synonyms=show_synonyms
+                ))
 
-        # Case 3: No matches at all
-        print(f"Word '{args.word}' not found. No similar words found.")
-        return 1
+                # Show additional suggestions
+                if len(similar_words) > 1:
+                    other_suggestions = similar_words[1:][:3]  # Up to 3 more suggestions
+                    if other_suggestions:
+                        print("\nOther similar words:")
+                        for suggestion in other_suggestions:
+                            print(f"- {suggestion}")
+
+                success = True
+            else:
+                # Case 3: No matches at all
+                print(f"Word '{input_word}' not found. No similar words found.")
+
+        # Return success if at least one word was processed successfully
+        return 0 if success else 1
