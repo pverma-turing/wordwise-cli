@@ -1,0 +1,8 @@
+.idea
+.wordwise.db
+.DS_Store
+wordwise/.DS_Store
+wordwise/__pycache__/
+wordwise/commands/__pycache__/
+wordwise/data/__pycache__/
+wordwise/utils/__pycache__/
