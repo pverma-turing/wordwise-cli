@@ -56,7 +56,7 @@ class EditCommand(Command):
         existing_word_row = cursor.fetchone()
 
         if not existing_word_row:
-            print(f"The word '{args.word}' was not found.")
+            print(f"The word '{args.word}' was not found in your vocabulary database.")
             conn.close()
             return
 

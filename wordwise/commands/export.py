@@ -2,6 +2,7 @@
 Implementation of the 'export' command for WordWise CLI that exports saved words
 to a CSV file.
 """
+import os
 import sys
 import csv
 from datetime import datetime
@@ -36,6 +37,17 @@ class ExportCommand(Command):
     def execute(self, args):
         """Execute the export command."""
         # Create database directory if it doesn't exist
+
+        # Validate file path is not empty
+        if not args.file or args.file.strip() == "":
+            print("Error: Export file path cannot be empty.")
+            return
+
+        # Check if the directory is writable before proceeding
+        file_dir = os.path.dirname(args.file) or '.'
+        if not os.access(file_dir, os.W_OK):
+            print(f"Cannot write to file '{args.file}'. Check directory permissions and try again.")
+            sys.exit(1)
 
         conn = get_connection()
         cursor = conn.cursor()
