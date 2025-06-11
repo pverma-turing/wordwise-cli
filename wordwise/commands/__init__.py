@@ -5,3 +5,4 @@
 from wordwise.commands.lookup import LookupCommand
 from wordwise.commands.save import SaveCommand
 from wordwise.commands.view import ViewCommand
+from wordwise.commands.edit import EditCommand
