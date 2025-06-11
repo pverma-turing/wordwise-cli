@@ -2,13 +2,12 @@
 Implementation of the 'view' command for WordWise CLI that displays all saved words
 from the SQLite database in a tabular format.
 """
-import os
-import sqlite3
+import sys
 from datetime import datetime
 
 from .base import Command
 from wordwise.registry import register_command
-from ..data.database import get_connection
+from wordwise.data.database import get_connection
 
 
 @register_command
@@ -23,7 +22,7 @@ class ViewCommand(Command):
     @property
     def description(self):
         """Return the command description."""
-        return "Display all saved words from the database"
+        return "Display saved words from the database with optional filtering"
 
     def add_arguments(self, parser):
         """Add command-specific arguments."""
@@ -34,41 +33,111 @@ class ViewCommand(Command):
             help="Filter words by learning status ('to-review' or 'learned')"
         )
 
+        # Add date range filters
+        parser.add_argument(
+            "--from-date",
+            help="Show words added on or after this date (format: YYYY-MM-DD)"
+        )
+
+        parser.add_argument(
+            "--to-date",
+            help="Show words added on or before this date (format: YYYY-MM-DD)"
+        )
+
+    def validate_date_format(self, date_str, arg_name):
+        """Validate that a date string is in YYYY-MM-DD format."""
+        try:
+            datetime.strptime(date_str, "%Y-%m-%d")
+            return True
+        except ValueError:
+            print(f"Error: Invalid date format for {arg_name}. Please use YYYY-MM-DD format.")
+            return False
+
     def execute(self, args):
         """Execute the view command."""
+        # Validate date formats if provided
+        if args.from_date and not self.validate_date_format(args.from_date, "--from-date"):
+            sys.exit(1)
+
+        if args.to_date and not self.validate_date_format(args.to_date, "--to-date"):
+            sys.exit(1)
+
         conn = get_connection()
         cursor = conn.cursor()
 
-        # Build the query based on the status filter
+        # Build the query based on the filters
         query = 'SELECT word, note, status, date_added FROM words'
+        conditions = []
         params = []
 
+        # Add status filter if provided
         if args.status:
-            query += ' WHERE status = ?'
+            conditions.append('status = ?')
             params.append(args.status)
 
+        # Add from_date filter if provided
+        if args.from_date:
+            # Convert to full datetime for comparison
+            from_datetime = f"{args.from_date}T00:00:00"
+            conditions.append('date_added >= ?')
+            params.append(from_datetime)
+
+        # Add to_date filter if provided
+        if args.to_date:
+            # Convert to full datetime for comparison (end of day)
+            to_datetime = f"{args.to_date}T23:59:59"
+            conditions.append('date_added <= ?')
+            params.append(to_datetime)
+
+        # Add WHERE clause if any conditions exist
+        if conditions:
+            query += ' WHERE ' + ' AND '.join(conditions)
+
+        # Add ordering
         query += ' ORDER BY date_added DESC'
 
-        # Query words from the database with potential filtering
+        # Execute the query with parameters
         cursor.execute(query, params)
         rows = cursor.fetchall()
 
         # Close connection
         conn.close()
 
+        # Handle case where no matching words are found
         if not rows:
-            # Customize message based on whether filtering was applied
+            filter_desc = []
             if args.status:
-                print(f"No words with status '{args.status}' found.")
+                filter_desc.append(f"status '{args.status}'")
+            if args.from_date:
+                filter_desc.append(f"added on or after {args.from_date}")
+            if args.to_date:
+                filter_desc.append(f"added on or before {args.to_date}")
+
+            if filter_desc:
+                print(f"No words found matching: {', '.join(filter_desc)}.")
             else:
                 print("No saved words found.")
             return
 
-        # Print header with status information if filtering was applied
+        # Build header based on active filters
+        header_parts = ["=== Saved Words"]
         if args.status:
-            print(f"\n=== Saved Words (Status: {args.status}) ===\n")
-        else:
-            print("\n=== Saved Words ===\n")
+            header_parts.append(f"Status: {args.status}")
+
+        date_range = []
+        if args.from_date:
+            date_range.append(f"From: {args.from_date}")
+        if args.to_date:
+            date_range.append(f"To: {args.to_date}")
+
+        if date_range:
+            header_parts.append(', '.join(date_range))
+
+        header = f"\n{' ('.join(header_parts)}"
+        if len(header_parts) > 1:  # If we have filters, close the parenthesis
+            header += ")"
+
+        print(f"{header} ===\n")
 
         # Determine maximum width for each column
         max_word_len = max(len(row[0]) for row in rows)
@@ -100,8 +169,25 @@ class ViewCommand(Command):
 
             print(format_str.format(word, note_display, status, display_date))
 
-        # Print summary with filtering information if applicable
+        # Build total words message with active filters
+        total_msg = f"\nTotal words"
+        filter_desc = []
+
         if args.status:
-            print(f"\nTotal words with status '{args.status}': {len(rows)}")
-        else:
-            print(f"\nTotal words: {len(rows)}")
+            filter_desc.append(f"with status '{args.status}'")
+        if args.from_date or args.to_date:
+            date_clause = "added"
+            if args.from_date:
+                date_clause += f" on or after {args.from_date}"
+            if args.from_date and args.to_date:
+                date_clause += " and"
+            if args.to_date:
+                if not args.from_date:
+                    date_clause += " on or before"
+                date_clause += f" {args.to_date}"
+            filter_desc.append(date_clause)
+
+        if filter_desc:
+            total_msg += f" {' '.join(filter_desc)}"
+
+        print(f"{total_msg}: {len(rows)}")
