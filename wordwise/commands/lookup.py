@@ -53,16 +53,23 @@ class LookupCommand(Command):
             action="store_true",
             default=False
         )
+        parser.add_argument(
+            "--quiet", "-q",
+            help="Suppress informational messages and suggestions",
+            action="store_true",
+            default=False
+        )
 
     def execute(self, args):
         show_examples = args.example
         show_synonyms = args.synonyms
         format_type = args.format
         offline_mode = args.offline
+        quiet_mode = args.quiet
         success = False  # Track if at least one word was found
 
-        # Notify user if offline mode is active
-        if offline_mode and format_type == "text":
+        # Notify user if offline mode is active (suppressed in quiet mode)
+        if offline_mode and format_type == "text" and not quiet_mode:
             print("Using offline dictionary source")
 
         # For JSON output, collect all results in a list
@@ -127,7 +134,9 @@ class LookupCommand(Command):
                     if similar_words:
                         first_suggestion = similar_words[0]
                         if format_type == "text":
-                            print(f"Word '{input_word}' not found. Did you mean '{first_suggestion}'?")
+                            # Show "Did you mean" message only when not in quiet mode
+                            if not quiet_mode:
+                                print(f"Word '{input_word}' not found. Did you mean '{first_suggestion}'?")
 
                             # Show the suggested word
                             entry = DICTIONARY[first_suggestion]
@@ -137,8 +146,8 @@ class LookupCommand(Command):
                                 show_synonyms=show_synonyms
                             ))
 
-                            # Show additional suggestions
-                            if len(similar_words) > 1:
+                            # Show additional suggestions only when not in quiet mode
+                            if not quiet_mode and len(similar_words) > 1:
                                 other_suggestions = similar_words[1:][:3]
                                 if other_suggestions:
                                     print("\nOther similar words:")
