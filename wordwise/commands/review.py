@@ -44,6 +44,14 @@ class ReviewCommand(Command):
         columns = [info[1] for info in cursor.fetchall()]
         return column_name in columns
 
+    def _get_valid_recall_input(self):
+        """Get a valid recall assessment input (y/n) from the user."""
+        while True:
+            response = input("Did you recall the word correctly? (y/n): ").strip().lower()
+            if response in ['y', 'n']:
+                return response == 'y'  # Return True for 'y', False for 'n'
+            print("Please enter 'y' for correct or 'n' for incorrect.")
+
     def execute(self, args):
         """Execute the review command with the provided arguments."""
         # Connect to the database
@@ -101,10 +109,23 @@ class ReviewCommand(Command):
             print("Press Enter after each word to continue to the next one.")
             print("-" * 40)
 
+            # Track correct recalls for summary
+            total_words = len(words)
+            correct_recalls = 0
+
             # Display each word and wait for user input
             for i, (word, note, date_added, status) in enumerate(words, 1):
-                print(f"\nWord {i}/{len(words)}:")
+                print(f"\nWord {i}/{total_words}:")
                 print(f"{word}")
+
+                # Get self-assessment from user
+                recall_correct = self._get_valid_recall_input()
+                if recall_correct:
+                    correct_recalls += 1
+                    print("Great job!")
+                else:
+                    print("Don't worry, you'll get it next time!")
+
                 input("Press Enter to see details...")
 
                 # Display information about the word
@@ -115,11 +136,13 @@ class ReviewCommand(Command):
                     print("\nYour note:")
                     print(f"{note}")
 
-                if i < len(words):
+                if i < total_words:
                     input("\nPress Enter for the next word...")
                     print("\n" + "-" * 40)
 
-            print("\nReview completed!")
+            # Display summary after review is complete
+            print("\nReview complete. You recalled",
+                  f"{correct_recalls} out of {total_words} words correctly.")
 
         except sqlite3.Error as e:
             print(f"Database error: {e}")
