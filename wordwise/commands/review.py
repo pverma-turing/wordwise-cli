@@ -13,7 +13,8 @@ class ReviewCommand(Command):
     """Command for reviewing previously saved words.
 
     This command allows users to review words they have saved in the database,
-    with options to filter by due date and limit the number of words.
+    with options to filter by due date, limit the number of words, and resume
+    incomplete review sessions.
     """
 
     @property
@@ -36,6 +37,11 @@ class ReviewCommand(Command):
             type=int,
             help="Limit the number of words to review",
             default=None
+        )
+        parser.add_argument(
+            "--resume",
+            action="store_true",
+            help="Resume an incomplete review by skipping already reviewed words"
         )
 
     def _has_column(self, cursor, table_name, column_name):
@@ -109,6 +115,10 @@ class ReviewCommand(Command):
                     # Fallback to status for backwards compatibility
                     conditions.append("status = 'to-review'")
 
+            # Add resume condition if specified
+            if args.resume and self._has_column(cursor, "words", "last_review_result"):
+                conditions.append("(last_review_result IS NULL)")
+
             # Apply WHERE conditions if any exist
             if conditions:
                 query_parts.append("WHERE " + " AND ".join(conditions))
@@ -128,7 +138,9 @@ class ReviewCommand(Command):
 
             # Check if there are any words to review
             if not words:
-                if args.due_only:
+                if args.resume:
+                    print("No new words to review. All available words have already been reviewed.")
+                elif args.due_only:
                     print("No words are due for review.")
                 else:
                     print("You have no saved words to review.")
@@ -136,6 +148,8 @@ class ReviewCommand(Command):
 
             # Display the number of words to review
             print(f"You have {len(words)} word(s) to review.")
+            if args.resume:
+                print("Resuming from where you left off (skipping previously reviewed words).")
             print("Press Enter after each word to continue to the next one.")
             print("-" * 40)
 
