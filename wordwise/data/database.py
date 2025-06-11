@@ -5,7 +5,7 @@ import sqlite3
 from datetime import datetime
 
 # Store database in user's home directory
-DB_PATH = os.path.expanduser("~/.wordwise.db")
+DB_PATH = os.path.expanduser(".wordwise.db")
 
 
 def get_connection():
