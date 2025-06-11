@@ -1,4 +1,5 @@
 import datetime
+import random
 import sqlite3
 import sys
 from typing import List, Optional
@@ -13,8 +14,8 @@ class ReviewCommand(Command):
     """Command for reviewing previously saved words.
 
     This command allows users to review words they have saved in the database,
-    with options to filter by due date, limit the number of words, and resume
-    incomplete review sessions.
+    with options to filter by due date, limit the number of words, resume
+    incomplete review sessions, and shuffle the review order.
     """
 
     @property
@@ -42,6 +43,11 @@ class ReviewCommand(Command):
             "--resume",
             action="store_true",
             help="Resume an incomplete review by skipping already reviewed words"
+        )
+        parser.add_argument(
+            "--shuffle",
+            action="store_true",
+            help="Randomize the order of words for review"
         )
 
     def _has_column(self, cursor, table_name, column_name):
@@ -134,7 +140,7 @@ class ReviewCommand(Command):
             # Build and execute the final query
             query = " ".join(query_parts)
             cursor.execute(query, params)
-            words = cursor.fetchall()
+            words = list(cursor.fetchall())  # Convert to list to support shuffling
 
             # Check if there are any words to review
             if not words:
@@ -146,10 +152,19 @@ class ReviewCommand(Command):
                     print("You have no saved words to review.")
                 return
 
+            # Shuffle the words if requested
+            if args.shuffle:
+                random.shuffle(words)
+                shuffle_message = "Words have been randomized for this review session."
+            else:
+                shuffle_message = ""
+
             # Display the number of words to review
             print(f"You have {len(words)} word(s) to review.")
             if args.resume:
                 print("Resuming from where you left off (skipping previously reviewed words).")
+            if shuffle_message:
+                print(shuffle_message)
             print("Press Enter after each word to continue to the next one.")
             print("-" * 40)
 
