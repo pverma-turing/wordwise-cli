@@ -16,6 +16,7 @@ class ReviewCommand(Command):
     This command allows users to review words they have saved in the database,
     with options to filter by due date, limit the number of words, resume
     incomplete review sessions, shuffle the review order, and reset review results.
+    Users can also pause a review session at any time.
     """
 
     @property
@@ -93,6 +94,11 @@ class ReviewCommand(Command):
             print(f"Warning: Could not update review result for '{word}': {e}")
             return False
 
+    def _check_for_pause(self):
+        """Check if user wants to pause the session."""
+        response = input("Press Enter to continue, or type 'pause' to end the session here: ").strip().lower()
+        return response == 'pause'
+
     def _build_query_conditions(self, args, has_next_review_date, has_last_review_result):
         """Build query conditions based on command arguments."""
         conditions = []
@@ -111,6 +117,9 @@ class ReviewCommand(Command):
 
         # Add resume condition if specified and not resetting
         if args.resume and not args.reset and has_last_review_result:
+            conditions.append("(last_review_result IS NULL)")
+        elif not args.resume and not args.reset and has_last_review_result:
+            # By default, skip reviewed words unless explicitly asked to resume or reset
             conditions.append("(last_review_result IS NULL)")
 
         return conditions, params
@@ -186,7 +195,7 @@ class ReviewCommand(Command):
 
             # Check if there are any words to review
             if not words:
-                if args.resume and not args.reset:
+                if args.resume:
                     print("No new words to review. All available words have already been reviewed.")
                 elif args.due_only:
                     print("No words are due for review.")
@@ -203,6 +212,7 @@ class ReviewCommand(Command):
 
             # Display the number of words to review
             print(f"You have {len(words)} word(s) to review.")
+            print("You can pause the session anytime by typing 'pause'.")
             if args.resume and not args.reset:
                 print("Resuming from where you left off (skipping previously reviewed words).")
             if shuffle_message:
@@ -213,6 +223,7 @@ class ReviewCommand(Command):
             # Track correct recalls for summary
             total_words = len(words)
             correct_recalls = 0
+            words_reviewed = 0  # Track how many words were reviewed before pausing
 
             # Display each word and wait for user input
             for i, word_row in enumerate(words, 1):
@@ -231,6 +242,7 @@ class ReviewCommand(Command):
                 update_success = self._update_review_result(cursor, word, recall_correct)
                 if update_success:
                     conn.commit()
+                    words_reviewed += 1
 
                 if recall_correct:
                     correct_recalls += 1
@@ -249,11 +261,18 @@ class ReviewCommand(Command):
                     print(f"{note}")
 
                 if i < total_words:
-                    input("\nPress Enter for the next word...")
+                    # Give user option to continue or pause
+                    pause_requested = self._check_for_pause()
+                    if pause_requested:
+                        print("\nSession paused. Your progress has been saved.")
+                        print(f"You have reviewed {words_reviewed} of {total_words} words.")
+                        print(f"You recalled {correct_recalls} out of {words_reviewed} words correctly.")
+                        print("To continue reviewing remaining words, run the command again with --resume flag.")
+                        return
                     print("\n" + "-" * 40)
 
             # Display summary after review is complete
-            print("\nReview complete. You recalled",
+            print("\nReview complete! You recalled",
                   f"{correct_recalls} out of {total_words} words correctly.")
             print("Your results have been saved to the database.")
 
