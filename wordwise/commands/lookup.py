@@ -1,3 +1,4 @@
+# wordwise/commands/lookup.py
 """Lookup command for WordWise."""
 
 import argparse
@@ -6,7 +7,6 @@ from wordwise.registry import register_command
 from wordwise.data.dictionary import DICTIONARY
 from wordwise.utils.formatter import format_dictionary_entry
 from wordwise.utils.matching import find_similar_words
-
 
 @register_command
 class LookupCommand(Command):
@@ -25,21 +25,28 @@ class LookupCommand(Command):
             "word",
             help="The word to look up"
         )
+        parser.add_argument(
+            "--example", "-e",
+            help="Include example usages in the output",
+            action="store_true",
+            default=False
+        )
 
     def execute(self, args):
         word = args.word.lower()
+        show_examples = args.example
 
         # Case 1: Exact match
         if word in DICTIONARY:
             entry = DICTIONARY[word]
-            print(format_dictionary_entry(word, entry))
+            print(format_dictionary_entry(word, entry, show_examples=show_examples))
             return 0
 
         # Try case-insensitive match first
         for dict_word in DICTIONARY:
             if dict_word.lower() == word:
                 entry = DICTIONARY[dict_word]
-                print(format_dictionary_entry(dict_word, entry))
+                print(format_dictionary_entry(dict_word, entry, show_examples=show_examples))
                 return 0
 
         # Case 2: No exact match, try to find similar words
@@ -51,7 +58,7 @@ class LookupCommand(Command):
 
             # If we have a suggestion, show it
             entry = DICTIONARY[first_suggestion]
-            print(format_dictionary_entry(first_suggestion, entry))
+            print(format_dictionary_entry(first_suggestion, entry, show_examples=show_examples))
 
             # If we have more suggestions, show them too
             if len(similar_words) > 1:

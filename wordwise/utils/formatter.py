@@ -24,13 +24,14 @@ def format_section(title, content):
     return formatted
 
 
-def format_dictionary_entry(word, entry):
+def format_dictionary_entry(word, entry, show_examples=True):
     """
     Format a dictionary entry for display.
 
     Args:
         word: The word being defined
         entry: Dictionary with definition, synonyms, and examples
+        show_examples: Whether to include examples in the output
 
     Returns:
         Formatted entry string
@@ -44,7 +45,8 @@ def format_dictionary_entry(word, entry):
     if "synonyms" in entry and entry["synonyms"]:
         result += format_section("Synonyms", entry["synonyms"])
 
-    if "examples" in entry and entry["examples"]:
+    # Only include examples when show_examples is True
+    if show_examples and "examples" in entry and entry["examples"]:
         result += format_section("Examples", entry["examples"])
 
     return result
