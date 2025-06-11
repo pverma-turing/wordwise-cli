@@ -22,7 +22,7 @@ class ViewCommand(Command):
     @property
     def description(self):
         """Return the command description."""
-        return "Display saved words from the database with optional filtering"
+        return "Display saved words from the database with optional filtering and sorting"
 
     def add_arguments(self, parser):
         """Add command-specific arguments."""
@@ -42,6 +42,14 @@ class ViewCommand(Command):
         parser.add_argument(
             "--to-date",
             help="Show words added on or before this date (format: YYYY-MM-DD)"
+        )
+
+        # Add sorting option
+        parser.add_argument(
+            "--sort-by",
+            choices=["word", "date_added", "status"],
+            default="date_added",
+            help="Field to sort results by (default: date_added)"
         )
 
     def validate_date_format(self, date_str, arg_name):
@@ -93,8 +101,8 @@ class ViewCommand(Command):
         if conditions:
             query += ' WHERE ' + ' AND '.join(conditions)
 
-        # Add ordering
-        query += ' ORDER BY date_added DESC'
+        # Add ORDER BY clause based on sort option (default to date_added in ascending order)
+        query += f' ORDER BY {args.sort_by} ASC'
 
         # Execute the query with parameters
         cursor.execute(query, params)
@@ -119,7 +127,7 @@ class ViewCommand(Command):
                 print("No saved words found.")
             return
 
-        # Build header based on active filters
+        # Build header based on active filters and sort
         header_parts = ["=== Saved Words"]
         if args.status:
             header_parts.append(f"Status: {args.status}")
@@ -133,8 +141,16 @@ class ViewCommand(Command):
         if date_range:
             header_parts.append(', '.join(date_range))
 
+        # Add sorting information to header
+        sort_field_display = {
+            "word": "alphabetically",
+            "date_added": "by date (oldest first)",
+            "status": "by status"
+        }
+        header_parts.append(f"Sorted {sort_field_display.get(args.sort_by, args.sort_by)}")
+
         header = f"\n{' ('.join(header_parts)}"
-        if len(header_parts) > 1:  # If we have filters, close the parenthesis
+        if len(header_parts) > 1:  # If we have filters/sort info, close the parenthesis
             header += ")"
 
         print(f"{header} ===\n")
