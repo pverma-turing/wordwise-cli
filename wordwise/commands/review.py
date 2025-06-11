@@ -15,7 +15,8 @@ class ReviewCommand(Command):
 
     This command allows users to review words they have saved in the database,
     with options to filter by due date, limit the number of words, resume
-    incomplete review sessions, shuffle the review order, and reset review results.
+    incomplete review sessions, shuffle the review order, reset review results,
+    or just display a summary of available words.
     Users can also pause a review session at any time.
     """
 
@@ -54,6 +55,11 @@ class ReviewCommand(Command):
             "--reset",
             action="store_true",
             help="Reset last_review_result to NULL for all selected words before review"
+        )
+        parser.add_argument(
+            "--summary-only",
+            action="store_true",
+            help="Display a summary of words matching current filters without starting a review session"
         )
 
     def _has_column(self, cursor, table_name, column_name):
@@ -146,6 +152,20 @@ class ReviewCommand(Command):
             print(f"Warning: Could not reset review results: {e}")
             return 0
 
+    def _get_due_words_count(self, cursor, has_next_review_date):
+        """Get the count of words that are due for review."""
+        today = datetime.date.today().isoformat()
+
+        if has_next_review_date:
+            query = "SELECT COUNT(*) FROM words WHERE next_review_date <= ?"
+            cursor.execute(query, (today,))
+        else:
+            # Fallback to status for backwards compatibility
+            query = "SELECT COUNT(*) FROM words WHERE status = 'to-review'"
+            cursor.execute(query)
+
+        return cursor.fetchone()[0]
+
     def _log_session(self, words_reviewed, correct_recalls, was_paused):
         """Log the review session to a file."""
         log_file = "review_sessions.log"
@@ -214,6 +234,13 @@ class ReviewCommand(Command):
             cursor.execute(query, params)
             words = list(cursor.fetchall())  # Convert to list to support shuffling
 
+            # Get total due words count (before limit is applied)
+            due_words_count = 0
+            if args.due_only:
+                due_words_count = len(words)  # Already filtered to due words
+            else:
+                due_words_count = self._get_due_words_count(cursor, has_next_review_date)
+
             # Check if there are any words to review
             if not words:
                 if args.resume:
@@ -222,6 +249,25 @@ class ReviewCommand(Command):
                     print("No words are due for review.")
                 else:
                     print("You have no saved words to review.")
+                return
+
+            # If summary-only flag is set, just show the summary and exit
+            if args.summary_only:
+                print(f"Summary of review session:")
+                print(f"- Total words matching current filters: {len(words)}")
+                print(f"- Words due for review: {due_words_count}")
+
+                filter_info = []
+                if args.due_only:
+                    filter_info.append("due words only")
+                if args.resume:
+                    filter_info.append("unreviewed words only")
+                if args.limit is not None:
+                    filter_info.append(f"limited to {args.limit} words")
+
+                if filter_info:
+                    print(f"- Active filters: {', '.join(filter_info)}")
+
                 return
 
             # Shuffle the words if requested
