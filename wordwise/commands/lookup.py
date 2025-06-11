@@ -47,12 +47,23 @@ class LookupCommand(Command):
             choices=["text", "json"],
             default="text"
         )
+        parser.add_argument(
+            "--offline", "-o",
+            help="Force using only the offline dictionary source",
+            action="store_true",
+            default=False
+        )
 
     def execute(self, args):
         show_examples = args.example
         show_synonyms = args.synonyms
         format_type = args.format
+        offline_mode = args.offline
         success = False  # Track if at least one word was found
+
+        # Notify user if offline mode is active
+        if offline_mode and format_type == "text":
+            print("Using offline dictionary source")
 
         # For JSON output, collect all results in a list
         json_results = []
@@ -80,7 +91,8 @@ class LookupCommand(Command):
                         word, entry,
                         show_examples=show_examples,
                         show_synonyms=show_synonyms,
-                        status="found"
+                        status="found",
+                        offline=offline_mode
                     )
                 success = True
 
@@ -101,7 +113,8 @@ class LookupCommand(Command):
                                 dict_word, entry,
                                 show_examples=show_examples,
                                 show_synonyms=show_synonyms,
-                                status="found"
+                                status="found",
+                                offline=offline_mode
                             )
                         success = True
                         found = True
@@ -139,7 +152,8 @@ class LookupCommand(Command):
                                 show_synonyms=show_synonyms,
                                 status="suggestion",
                                 original_query=input_word,
-                                other_suggestions=similar_words[1:][:3] if len(similar_words) > 1 else []
+                                other_suggestions=similar_words[1:][:3] if len(similar_words) > 1 else [],
+                                offline=offline_mode
                             )
 
                         success = True
@@ -151,7 +165,8 @@ class LookupCommand(Command):
                             result = {
                                 "query": input_word,
                                 "status": "not_found",
-                                "message": "No similar words found"
+                                "message": "No similar words found",
+                                "source": "offline" if offline_mode else "auto"
                             }
 
             # Add result to JSON output collection if using JSON format
@@ -170,7 +185,8 @@ class LookupCommand(Command):
         return 0 if success else 1
 
     def _prepare_json_result(self, word, entry, show_examples=False, show_synonyms=False,
-                             status="found", original_query=None, other_suggestions=None):
+                             status="found", original_query=None, other_suggestions=None,
+                             offline=False):
         """
         Prepare a JSON result for a word lookup.
 
@@ -182,13 +198,15 @@ class LookupCommand(Command):
             status: Lookup status ("found" or "suggestion")
             original_query: Original query if this is a suggestion
             other_suggestions: List of other suggestions
+            offline: Whether offline mode is active
 
         Returns:
             Dictionary formatted for JSON output
         """
         result = {
             "word": word,
-            "status": status
+            "status": status,
+            "source": "offline" if offline else "auto"
         }
 
         if original_query:
