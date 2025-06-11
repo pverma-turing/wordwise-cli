@@ -1,3 +1,6 @@
+# wordwise/__init__.py
 """WordWise - A Smart Command-Line Dictionary & Word Learning App."""
 
-__version__ = '0.1.0'
+from wordwise.version import __version__
+
+__all__ = ["__version__"]

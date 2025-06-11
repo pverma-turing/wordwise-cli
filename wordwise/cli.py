@@ -7,13 +7,23 @@ CLI entry point for the WordWise application.
 import argparse
 import sys
 from wordwise.config import COMMANDS
+from wordwise.version import __version__
 
 
 def create_parser():
     """Create the main argument parser with subcommands."""
+    # Create the main parser
     parser = argparse.ArgumentParser(
         description="WordWise - A Smart Command-Line Dictionary & Word Learning App",
         prog="wordwise"
+    )
+
+    # Add version argument to the main parser
+    parser.add_argument(
+        "--version", "-v",
+        action="version",
+        version=f"WordWise CLI version {__version__}",
+        help="Show program's version number and exit"
     )
 
     # Create subparsers for each command
@@ -22,7 +32,9 @@ def create_parser():
         dest="command",
         help="Command to execute"
     )
-    subparsers.required = True
+
+    # Make subparsers required only if --version is not present
+    # This is handled manually below since we can't conditionally set required
 
     # Register all commands from the registry
     for command_name, command_class in COMMANDS.items():
@@ -40,7 +52,21 @@ def main():
     """Main entry point for the CLI."""
     # Parse command line arguments
     parser = create_parser()
+
+    # Parse known arguments first to check if --version is present
+    args, remaining = parser.parse_known_args()
+
+    # If --version is present, it will be handled automatically by argparse
+    # and the program will exit after printing the version
+
+    # If we reach this point, --version was not present or has been handled
+    # Re-parse with full argument validation
     args = parser.parse_args()
+
+    # If no command was provided and --version wasn't used, show help
+    if not hasattr(args, 'command') or args.command is None:
+        parser.print_help()
+        return 1
 
     # Get the command class and instantiate it
     command_class = COMMANDS.get(args.command)
