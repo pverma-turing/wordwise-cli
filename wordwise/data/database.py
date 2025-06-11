@@ -55,6 +55,15 @@ def save_word(word, note=None):
         conn = get_connection()
         cursor = conn.cursor()
 
+        # Check if the word already exists (case-insensitive)
+        cursor.execute('SELECT word FROM words WHERE word COLLATE NOCASE = ?', (word,))
+        existing_word = cursor.fetchone()
+
+        if existing_word:
+            print(f"The word '{word}' is already saved.")
+            conn.close()
+            return
+
         # Get current date in ISO format (YYYY-MM-DD)
         today = datetime.now().strftime("%Y-%m-%d")
 
