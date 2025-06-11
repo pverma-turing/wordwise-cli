@@ -44,6 +44,17 @@ class ReviewCommand(Command):
         columns = [info[1] for info in cursor.fetchall()]
         return column_name in columns
 
+    def _ensure_last_review_result_column(self, cursor):
+        """Ensure the last_review_result column exists in the words table."""
+        if not self._has_column(cursor, "words", "last_review_result"):
+            try:
+                cursor.execute("ALTER TABLE words ADD COLUMN last_review_result TEXT")
+                return True
+            except sqlite3.Error as e:
+                print(f"Warning: Could not add last_review_result column: {e}")
+                return False
+        return True
+
     def _get_valid_recall_input(self):
         """Get a valid recall assessment input (y/n) from the user."""
         while True:
@@ -52,16 +63,35 @@ class ReviewCommand(Command):
                 return response == 'y'  # Return True for 'y', False for 'n'
             print("Please enter 'y' for correct or 'n' for incorrect.")
 
+    def _update_review_result(self, cursor, word, recall_correct):
+        """Update the last_review_result for the given word."""
+        result = "correct" if recall_correct else "incorrect"
+        try:
+            cursor.execute(
+                "UPDATE words SET last_review_result = ? WHERE word = ?",
+                (result, word)
+            )
+            return True
+        except sqlite3.Error as e:
+            print(f"Warning: Could not update review result for '{word}': {e}")
+            return False
+
     def execute(self, args):
         """Execute the review command with the provided arguments."""
         # Connect to the database
         conn = None
         try:
             conn = get_connection()
+            conn.row_factory = sqlite3.Row  # Use Row factory to access columns by name
             cursor = conn.cursor()
 
+            # Ensure the last_review_result column exists
+            column_added = self._ensure_last_review_result_column(cursor)
+            if column_added:
+                conn.commit()
+
             # Build the query based on the arguments
-            query_parts = ["SELECT word, note, date_added, status FROM words"]
+            query_parts = ["SELECT word, note, date_added, status, rowid FROM words"]
             conditions = []
             params = []
 
@@ -114,12 +144,23 @@ class ReviewCommand(Command):
             correct_recalls = 0
 
             # Display each word and wait for user input
-            for i, (word, note, date_added, status) in enumerate(words, 1):
+            for i, word_row in enumerate(words, 1):
+                word = word_row['word']
+                note = word_row['note']
+                date_added = word_row['date_added']
+                status = word_row['status']
+
                 print(f"\nWord {i}/{total_words}:")
                 print(f"{word}")
 
                 # Get self-assessment from user
                 recall_correct = self._get_valid_recall_input()
+
+                # Update the last_review_result in the database
+                update_success = self._update_review_result(cursor, word, recall_correct)
+                if update_success:
+                    conn.commit()
+
                 if recall_correct:
                     correct_recalls += 1
                     print("Great job!")
@@ -143,6 +184,7 @@ class ReviewCommand(Command):
             # Display summary after review is complete
             print("\nReview complete. You recalled",
                   f"{correct_recalls} out of {total_words} words correctly.")
+            print("Your results have been saved to the database.")
 
         except sqlite3.Error as e:
             print(f"Database error: {e}")
