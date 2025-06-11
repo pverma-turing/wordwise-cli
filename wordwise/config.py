@@ -3,7 +3,8 @@
 
 from wordwise.registry import COMMANDS
 # Import all command modules to trigger decorator registration
-from wordwise.commands import LookupCommand, ViewCommand, SaveCommand, EditCommand, ExportCommand
+from wordwise.commands import LookupCommand, ViewCommand, \
+    SaveCommand, EditCommand, ExportCommand, ReviewCommand
 # add future commands herea
 
 AVAILABLE_COMMANDS = COMMANDS
