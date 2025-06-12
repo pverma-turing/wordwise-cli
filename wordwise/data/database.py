@@ -2,7 +2,6 @@
 
 import os
 import sqlite3
-from datetime import datetime
 
 # Store database in user's home directory
 DB_PATH = os.path.expanduser(".wordwise.db")
@@ -69,44 +68,45 @@ def init_database():
 
 def save_word(word, note=None):
     """
-    Save a word to the database.
+    Save a word to the database with initial spaced repetition scheduling values.
 
     Args:
-        word (str): Word to save
-        note (str, optional): User-provided note
+        word (str): The word to save
+        note (str, optional): An optional note for the word
 
     Returns:
-        bool: True if successful, False if word already exists
+        bool: True if word was saved, False if word already exists
     """
+    conn = get_connection()
+    cursor = conn.cursor()
+
     try:
-        conn = get_connection()
-        cursor = conn.cursor()
-
-        # Check if the word already exists (case-insensitive)
-        cursor.execute('SELECT word FROM words WHERE word COLLATE NOCASE = ?', (word,))
-        existing_word = cursor.fetchone()
-
-        if existing_word:
-            print(f"The word '{word}' is already saved.")
+        # Check if word already exists
+        cursor.execute("SELECT word FROM words WHERE word = ?", (word,))
+        if cursor.fetchone():
             conn.close()
-            return
+            return False
 
-        # Get current date in ISO format (YYYY-MM-DD)
-        today = datetime.now().strftime("%Y-%m-%d")
+        # Get current date in ISO format
+        from datetime import datetime
+        current_date = datetime.now().isoformat()
 
-        # Insert the word
+        # Insert new word with spaced repetition fields initialized
         cursor.execute(
-            "INSERT INTO words (word, note, date_added, status) VALUES (?, ?, ?, ?)",
-            (word, note, today, "to-review")
+            """INSERT INTO words 
+               (word, note, date_added, status, review_interval, last_review_date, next_review_date) 
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (word, note, current_date, "to-review", 1, current_date, current_date)
         )
 
         conn.commit()
-        conn.close()
         return True
-
-    except sqlite3.IntegrityError:
-        # Word already exists (due to UNIQUE constraint)
+    except sqlite3.Error as e:
+        # Log the error or handle it appropriately
+        print(f"Database error: {e}")
         return False
+    finally:
+        conn.close()
 
 
 # Initialize database when module is imported
