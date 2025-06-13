@@ -2,6 +2,7 @@
 
 import os
 import sqlite3
+from datetime import timedelta, datetime
 
 # Store database in user's home directory
 DB_PATH = os.path.expanduser(".wordwise.db")

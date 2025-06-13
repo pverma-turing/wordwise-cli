@@ -4,6 +4,7 @@ import sqlite3
 import sys
 from typing import List, Optional
 
+from datetime import datetime as dt
 from wordwise.commands.base import Command
 from wordwise.data.database import get_connection
 from wordwise.registry import register_command
@@ -99,6 +100,53 @@ class ReviewCommand(Command):
         except sqlite3.Error as e:
             print(f"Warning: Could not update review result for '{word}': {e}")
             return False
+
+    def _update_scheduling(self, cursor, word, recall_correct):
+        """
+        Update spaced repetition scheduling parameters for a word after review.
+
+        Args:
+            cursor: Database cursor
+            word: The word that was reviewed
+            recall_correct: Boolean indicating if the user recalled the word correctly
+        """
+        try:
+            # Get the current review_interval
+            cursor.execute("SELECT review_interval FROM words WHERE word = ?", (word,))
+            result = cursor.fetchone()
+
+            # Handle case where review_interval might be NULL/None
+            current_interval = result[0] if result and result[0] is not None else 1
+
+            # Update interval based on recall result
+            if recall_correct:
+                # Double the interval for correct recalls
+                new_interval = current_interval * 2
+            else:
+                # Reset to minimum for incorrect recalls
+                new_interval = 1
+
+            # Apply min/max caps (1-60 days)
+            new_interval = max(1, min(new_interval, 60))
+
+            # Calculate dates
+            today = dt.now()
+            today_iso = today.isoformat()
+            next_review = today + datetime.timedelta(days=new_interval)
+            next_review_iso = next_review.isoformat()
+
+            # Update the word with new scheduling information
+            cursor.execute(
+                """UPDATE words 
+                   SET review_interval = ?, 
+                       last_review_date = ?, 
+                       next_review_date = ?
+                   WHERE word = ?""",
+                (new_interval, today_iso, next_review_iso, word)
+            )
+        except Exception as e:
+            # Log the error but don't disrupt the review flow
+            print(f"Error updating scheduling for '{word}': {e}")
 
     def _check_for_pause(self):
         """Check if user wants to pause the session."""
@@ -311,6 +359,8 @@ class ReviewCommand(Command):
                 if update_success:
                     conn.commit()
                     words_reviewed += 1
+
+                self._update_scheduling(cursor, word, recall_correct)
 
                 if recall_correct:
                     correct_recalls += 1
