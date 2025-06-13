@@ -104,6 +104,8 @@ class ReviewCommand(Command):
     def _update_scheduling(self, cursor, word, recall_correct):
         """
         Update spaced repetition scheduling parameters for a word after review.
+        Handles backward compatibility with records that may have NULL values
+        for the spaced repetition fields.
 
         Args:
             cursor: Database cursor
@@ -115,8 +117,12 @@ class ReviewCommand(Command):
             cursor.execute("SELECT review_interval FROM words WHERE word = ?", (word,))
             result = cursor.fetchone()
 
-            # Handle case where review_interval might be NULL/None
-            current_interval = result[0] if result and result[0] is not None else 1
+            # Handle case where review_interval might be NULL/None or record doesn't exist
+            if not result or result[0] is None:
+                # For backward compatibility, use default value 1
+                current_interval = 1
+            else:
+                current_interval = result[0]
 
             # Update interval based on recall result
             if recall_correct:
@@ -136,6 +142,8 @@ class ReviewCommand(Command):
             next_review_iso = next_review.isoformat()
 
             # Update the word with new scheduling information
+            # For backwards compatibility, we don't need special handling for
+            # last_review_date or next_review_date being NULL as we're overwriting them anyway
             cursor.execute(
                 """UPDATE words 
                    SET review_interval = ?, 
@@ -147,6 +155,9 @@ class ReviewCommand(Command):
         except Exception as e:
             # Log the error but don't disrupt the review flow
             print(f"Error updating scheduling for '{word}': {e}")
+            # Optionally, you could add more detailed error information for debugging
+            import traceback
+            print(traceback.format_exc())
 
     def _check_for_pause(self):
         """Check if user wants to pause the session."""
