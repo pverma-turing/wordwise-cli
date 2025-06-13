@@ -109,5 +109,68 @@ def save_word(word, note=None):
         conn.close()
 
 
+def update_word_scheduling(conn, word, is_correct):
+    """
+    Update spaced repetition scheduling fields for a word after review.
+
+    Args:
+        conn (sqlite3.Connection): Database connection
+        word (str): The word that was reviewed
+        is_correct (bool): Whether the user correctly recalled the word
+    """
+    cursor = conn.cursor()
+
+    try:
+        # First, get the current review_interval (if it exists)
+        cursor.execute("SELECT review_interval FROM words WHERE word = ?", (word,))
+        result = cursor.fetchone()
+
+        if result is None:
+            # Word not found - this should not happen in normal operation
+            print(f"Warning: '{word}' not found in database when updating scheduling.")
+            return
+
+        current_interval = result[0]
+        # Handle None/NULL value for backwards compatibility
+        if current_interval is None:
+            current_interval = 1
+
+        # Update the review_interval based on recall result
+        if is_correct:
+            # Double the interval (with a minimum of 1 day)
+            new_interval = max(1, current_interval * 2)
+        else:
+            # Reset to 1 day for incorrect recalls
+            new_interval = 1
+
+        # Calculate dates
+        today = datetime.now()
+        today_iso = today.isoformat()
+        next_review = today + timedelta(days=new_interval)
+        next_review_iso = next_review.isoformat()
+
+        # Update the word with new scheduling information
+        cursor.execute(
+            """UPDATE words 
+               SET review_interval = ?, 
+                   last_review_date = ?, 
+                   next_review_date = ?, 
+                   last_review_result = ?
+               WHERE word = ?""",
+            (new_interval, today_iso, next_review_iso,
+             "correct" if is_correct else "incorrect", word)
+        )
+
+        conn.commit()
+    except sqlite3.Error as e:
+        # Log the error but don't crash the review session
+        print(f"Database error when updating scheduling for '{word}': {e}")
+        # Attempt to rollback if needed
+        try:
+            conn.rollback()
+        except:
+            pass
+
+
 # Initialize database when module is imported
 init_database()
