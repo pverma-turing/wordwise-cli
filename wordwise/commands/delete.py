@@ -31,6 +31,13 @@ class DeleteCommand(Command):
             help="Restore the most recently deleted word"
         )
         parser.add_argument(
+            "--undo-count",
+            type=int,
+            metavar="N",
+            help="Number of recent deletions to undo (default: 1)"
+        )
+
+        parser.add_argument(
             "--force",
             action="store_true",
             help="Skip confirmation prompt and delete words immediately"
@@ -88,7 +95,18 @@ class DeleteCommand(Command):
 
             # Handle undo operation
             if args.undo:
-                self.handle_undo(conn, cursor)
+                # Determine how many entries to undo
+                undo_count = args.undo_count if args.undo_count is not None else 1
+                if undo_count <= 0:
+                    print("Invalid undo count. Please specify a positive number.")
+                    return
+
+                self.handle_batch_undo(conn, cursor, undo_count)
+                return
+
+            # Handle --undo-count specified without --undo flag
+            if args.undo_count is not None and not args.undo:
+                print("--undo-count must be used with --undo flag.")
                 return
 
             # Ensure we have words to delete
@@ -169,8 +187,8 @@ class DeleteCommand(Command):
         except Exception as e:
             print(f"Warning: Could not store word for undo: {e}")
 
-    def handle_undo(self, conn, cursor):
-        """Handle the undo operation to restore the most recent deleted word from JSON file."""
+    def handle_batch_undo(self, conn, cursor, count):
+        """Handle batch undo operation to restore multiple deleted words."""
         # Load undo buffer
         undo_buffer = self.load_undo_buffer()
 
@@ -179,7 +197,74 @@ class DeleteCommand(Command):
             print("No deletions to undo.")
             return
 
+        # Determine how many entries we can actually restore
+        entries_to_restore = min(count, len(undo_buffer))
+
+        if entries_to_restore < count:
+            print(
+                f"Note: Only {entries_to_restore} deletion{'' if entries_to_restore == 1 else 's'} available to undo.")
+
+        # Get the current database schema (table columns) - do this once for efficiency
+        cursor.execute("PRAGMA table_info(words)")
+        current_schema = {row[1] for row in cursor.fetchall()}  # Set of column names
+
+        # Track statistics
+        restored_count = 0
+        skipped_count = 0
+
         try:
+            # Process each word to restore, one at a time
+            for i in range(entries_to_restore):
+                # Stop if we've run out of entries
+                if not undo_buffer:
+                    break
+
+                # Get the most recent (last) entry in the buffer
+                word_data = undo_buffer[-1]  # Access but don't remove the last item yet
+                exact_word = word_data["word"]
+
+                # Attempt to restore this word
+                result = self.restore_word(conn, cursor, undo_buffer, current_schema)
+
+                if result == "restored":
+                    restored_count += 1
+                elif result == "skipped":
+                    skipped_count += 1
+                elif result == "schema_mismatch":
+                    # Stop the entire batch operation if we hit a schema mismatch
+                    print(f"Batch undo operation stopped after restoring {restored_count} " +
+                          f"word{'' if restored_count == 1 else 's'} due to schema mismatch.")
+                    return
+
+            # Save the final state of the undo buffer
+            self.save_undo_buffer(undo_buffer)
+
+            # Provide summary of the operation
+            if restored_count > 0:
+                print(f"Successfully restored {restored_count} word{'' if restored_count == 1 else 's'}.")
+
+            if skipped_count > 0:
+                print(
+                    f"Skipped {skipped_count} word{'' if skipped_count == 1 else 's'} that already exist in the database.")
+
+            # Let the user know if more words can be restored
+            if undo_buffer:
+                remaining_count = len(undo_buffer)
+                print(f"{remaining_count} more deletion{'' if remaining_count == 1 else 's'} can be undone.")
+
+        except sqlite3.Error as e:
+            print(f"Database error during batch undo operation: {e}")
+            conn.rollback()
+        except Exception as e:
+            print(f"An unexpected error occurred during batch undo: {e}")
+
+    def restore_word(self, conn, cursor, undo_buffer, current_schema=None):
+        """Restore a single word from the undo buffer. Returns status: 'restored', 'skipped', or 'schema_mismatch'."""
+        try:
+            # Return early if buffer is empty
+            if not undo_buffer:
+                return "empty_buffer"
+
             # Get the most recent (last) entry in the buffer
             word_data = undo_buffer[-1]  # Access but don't remove the last item yet
 
@@ -189,16 +274,15 @@ class DeleteCommand(Command):
                 (word_data["word"],)
             )
             if cursor.fetchone():
-                print(f"Cannot undo deletion: Word '{word_data['word']}' already exists in the database.")
+                print(f"Skipped: Word '{word_data['word']}' already exists in the database.")
                 # Remove the entry we tried to restore
                 undo_buffer.pop()
-                # Save the updated buffer
-                self.save_undo_buffer(undo_buffer)
-                return
+                return "skipped"
 
-            # Get the current database schema (table columns)
-            cursor.execute("PRAGMA table_info(words)")
-            current_schema = {row[1] for row in cursor.fetchall()}  # Set of column names
+            # Get schema if not provided
+            if current_schema is None:
+                cursor.execute("PRAGMA table_info(words)")
+                current_schema = {row[1] for row in cursor.fetchall()}  # Set of column names
 
             # Extract fields from word_data (excluding 'id')
             word_fields = {col for col in word_data.keys() if col != 'id'}
@@ -206,10 +290,10 @@ class DeleteCommand(Command):
             # Check if all fields in word_data exist in the current schema
             missing_fields = word_fields - current_schema
             if missing_fields:
-                print("Undo failed: schema mismatch detected.")
+                print(f"Undo failed for '{word_data['word']}': schema mismatch detected.")
                 print(
                     f"The following fields are not present in the current database schema: {', '.join(missing_fields)}")
-                return  # Don't modify the undo buffer
+                return "schema_mismatch"  # Don't modify the undo buffer
 
             # Now we can safely remove the item from the buffer
             word_data = undo_buffer.pop()
@@ -230,17 +314,12 @@ class DeleteCommand(Command):
             conn.commit()
 
             print(f"Restored word '{word_data['word']}' to the database.")
-
-            # Save the updated undo buffer (without the entry we just restored)
-            self.save_undo_buffer(undo_buffer)
-
-            # Let the user know if more words can be restored
-            if undo_buffer:
-                word_count = len(undo_buffer)
-                print(f"{word_count} more deletion{'' if word_count == 1 else 's'} can be undone.")
+            return "restored"
 
         except sqlite3.Error as e:
-            print(f"Error during undo operation: {e}")
+            print(f"Error during word restoration: {e}")
             conn.rollback()
+            return "error"
         except Exception as e:
-            print(f"An unexpected error occurred during undo: {e}")
+            print(f"An unexpected error occurred during word restoration: {e}")
+            return "error"
