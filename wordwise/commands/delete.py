@@ -181,7 +181,7 @@ class DeleteCommand(Command):
 
         try:
             # Get the most recent (last) entry in the buffer
-            word_data = undo_buffer.pop()  # Remove and return the last item
+            word_data = undo_buffer[-1]  # Access but don't remove the last item yet
 
             # Check if the word already exists (might have been re-added)
             cursor.execute(
@@ -190,17 +190,37 @@ class DeleteCommand(Command):
             )
             if cursor.fetchone():
                 print(f"Cannot undo deletion: Word '{word_data['word']}' already exists in the database.")
-                # Save the updated buffer (without the entry we tried to restore)
+                # Remove the entry we tried to restore
+                undo_buffer.pop()
+                # Save the updated buffer
                 self.save_undo_buffer(undo_buffer)
                 return
 
-            # Extract all columns except 'id' which might be auto-incremented
-            columns = [col for col in word_data.keys() if col != 'id']
-            placeholders = ', '.join(['?'] * len(columns))
-            column_names = ', '.join(columns)
+            # Get the current database schema (table columns)
+            cursor.execute("PRAGMA table_info(words)")
+            current_schema = {row[1] for row in cursor.fetchall()}  # Set of column names
+
+            # Extract fields from word_data (excluding 'id')
+            word_fields = {col for col in word_data.keys() if col != 'id'}
+
+            # Check if all fields in word_data exist in the current schema
+            missing_fields = word_fields - current_schema
+            if missing_fields:
+                print("Undo failed: schema mismatch detected.")
+                print(
+                    f"The following fields are not present in the current database schema: {', '.join(missing_fields)}")
+                return  # Don't modify the undo buffer
+
+            # Now we can safely remove the item from the buffer
+            word_data = undo_buffer.pop()
+
+            # Extract fields that exist in both the word data and current schema
+            valid_columns = [col for col in word_data.keys() if col != 'id' and col in current_schema]
+            placeholders = ', '.join(['?'] * len(valid_columns))
+            column_names = ', '.join(valid_columns)
 
             # Prepare the values in the same order as columns
-            values = [word_data[col] for col in columns]
+            values = [word_data[col] for col in valid_columns]
 
             # Insert the word back into the database
             cursor.execute(
