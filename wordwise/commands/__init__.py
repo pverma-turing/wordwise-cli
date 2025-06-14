@@ -8,3 +8,4 @@ from wordwise.commands.view import ViewCommand
 from wordwise.commands.edit import EditCommand
 from wordwise.commands.export import ExportCommand
 from wordwise.commands.review import ReviewCommand
+from wordwise.commands.delete import DeleteCommand
