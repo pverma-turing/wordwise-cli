@@ -67,6 +67,12 @@ class ReviewCommand(Command):
             action='store_true',
             help='Reset scheduling information (intervals and dates) for selected words'
         )
+        parser.add_argument(
+            '--max-interval',
+            type=int,
+            default=60,
+            help='Maximum number of days between reviews (default: 60)'
+        )
 
     def _has_column(self, cursor, table_name, column_name):
         """Check if the given column exists in the specified table."""
@@ -106,7 +112,7 @@ class ReviewCommand(Command):
             print(f"Warning: Could not update review result for '{word}': {e}")
             return False
 
-    def _update_scheduling(self, cursor, word, recall_correct):
+    def _update_scheduling(self, cursor, word, recall_correct, max_interval=60):
         """
         Update spaced repetition scheduling parameters for a word after review.
         Handles backward compatibility with records that may have NULL values
@@ -116,6 +122,7 @@ class ReviewCommand(Command):
             cursor: Database cursor
             word: The word that was reviewed
             recall_correct: Boolean indicating if the user recalled the word correctly
+            max_interval: Maximum review interval in days (default: 60)
         """
         try:
             # Get the current review_interval
@@ -137,8 +144,8 @@ class ReviewCommand(Command):
                 # Reset to minimum for incorrect recalls
                 new_interval = 1
 
-            # Apply min/max caps (1-60 days)
-            new_interval = max(1, min(new_interval, 60))
+            # Apply min/max caps using the configurable max_interval
+            new_interval = max(1, min(new_interval, max_interval))
 
             # Calculate dates
             today = dt.now()
@@ -147,8 +154,6 @@ class ReviewCommand(Command):
             next_review_iso = next_review.isoformat()
 
             # Update the word with new scheduling information
-            # For backwards compatibility, we don't need special handling for
-            # last_review_date or next_review_date being NULL as we're overwriting them anyway
             cursor.execute(
                 """UPDATE words 
                    SET review_interval = ?, 
@@ -160,9 +165,6 @@ class ReviewCommand(Command):
         except Exception as e:
             # Log the error but don't disrupt the review flow
             print(f"Error updating scheduling for '{word}': {e}")
-            # Optionally, you could add more detailed error information for debugging
-            import traceback
-            print(traceback.format_exc())
 
     def _reset_scheduling(self, cursor, words):
         """
@@ -422,7 +424,7 @@ class ReviewCommand(Command):
                     conn.commit()
                     words_reviewed += 1
 
-                self._update_scheduling(cursor, word, recall_correct)
+                self._update_scheduling(cursor, word, recall_correct, args.max_interval)
 
                 if recall_correct:
                     correct_recalls += 1
