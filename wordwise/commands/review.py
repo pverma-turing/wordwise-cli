@@ -268,6 +268,51 @@ class ReviewCommand(Command):
 
         return cursor.fetchone()[0]
 
+    def _initialize_scheduling_fields(self, cursor):
+        """
+        Initialize spaced repetition scheduling fields for legacy records.
+        Finds all records with NULL scheduling fields and sets them to default values.
+
+        Args:
+            cursor: Database cursor
+        """
+        try:
+            # Calculate today's date
+            today = dt.now()
+            today_iso = today.isoformat()
+
+            # Find all records with missing scheduling data
+            # Using IS NULL to check for all three fields separately ensures we catch all variations
+            cursor.execute("""
+                SELECT word FROM words 
+                WHERE review_interval IS NULL 
+                   OR last_review_date IS NULL 
+                   OR next_review_date IS NULL
+            """)
+            legacy_words = [row[0] for row in cursor.fetchall()]
+
+            if not legacy_words:
+                return  # No legacy records to update
+
+            # Update all legacy records with default values
+            initialized_count = 0
+            for word in legacy_words:
+                cursor.execute("""
+                    UPDATE words
+                    SET review_interval = 1,
+                        last_review_date = ?,
+                        next_review_date = ?
+                    WHERE word = ?
+                """, (today_iso, today_iso, word))
+                initialized_count += cursor.rowcount
+
+            if initialized_count > 0:
+                print(f"Initialized scheduling data for {initialized_count} existing word(s).")
+
+        except Exception as e:
+            # Log the error but allow the review command to continue
+            print(f"Error initializing scheduling fields: {e}")
+
     def _log_session(self, words_reviewed, correct_recalls, was_paused):
         """Log the review session to a file."""
         log_file = "review_sessions.log"
@@ -297,6 +342,10 @@ class ReviewCommand(Command):
             conn = get_connection()
             conn.row_factory = sqlite3.Row  # Use Row factory to access columns by name
             cursor = conn.cursor()
+
+            # Initialize scheduling fields for legacy records
+            self._initialize_scheduling_fields(cursor)
+            conn.commit()  # Commit these changes immediately for safety
 
             # Ensure the last_review_result column exists
             has_last_review_result = self._ensure_last_review_result_column(cursor)
@@ -333,7 +382,6 @@ class ReviewCommand(Command):
 
             # Build and execute the final query
             query = " ".join(query_parts)
-            print(query)
             cursor.execute(query, params)
             words = list(cursor.fetchall())  # Convert to list to support shuffling
 
@@ -345,9 +393,7 @@ class ReviewCommand(Command):
                 due_words_count = self._get_due_words_count(cursor, has_next_review_date)
 
             # After all filtering is done (due-only, limit, resume, etc.) but before review starts
-            print(args.reset_schedule, words)
             if args.reset_schedule and words:
-                print(args.reset_schedule)
                 # Extract just the word strings from the word_data dictionaries
                 words_to_reset = [word_data['word'] for word_data in words]
                 self._reset_scheduling(cursor, words_to_reset)
