@@ -313,6 +313,40 @@ class ReviewCommand(Command):
             # Log the error but allow the review command to continue
             print(f"Error initializing scheduling fields: {e}")
 
+    def _display_word_for_review(self, word_data):
+        """
+        Display a word and its scheduling information during review.
+
+        Args:
+            word_data: Dictionary containing word information
+        """
+        word = word_data['word']
+
+        # Display the word and note (existing functionality)
+        print(f"\nWord: {word}")
+        if word_data['note']:
+            print(f"Note: {word_data['note']}")
+
+        # Display scheduling information
+        interval = word_data['review_interval']
+        last_review = word_data['last_review_date']
+        next_review = word_data['next_review_date']
+
+        # Format the interval
+        if interval is None:
+            interval_display = "N/A"
+        else:
+            interval_display = f"{interval} day{'s' if interval != 1 else ''}"
+
+        # Format the dates, handling NULL values
+        last_review_display = "N/A" if last_review is None else last_review.split('T')[0]  # Show date part only
+        next_review_display = "N/A" if next_review is None else next_review.split('T')[0]  # Show date part only
+
+        # Display scheduling information
+        print(f"Current interval: {interval_display}")
+        print(f"Last reviewed: {last_review_display}")
+        print(f"Next review due: {next_review_display}")
+
     def _log_session(self, words_reviewed, correct_recalls, was_paused):
         """Log the review session to a file."""
         log_file = "review_sessions.log"
@@ -366,7 +400,9 @@ class ReviewCommand(Command):
             )
 
             # Build the query based on the arguments
-            query_parts = ["SELECT word, note, date_added, status, rowid FROM words"]
+            query_parts = ["""SELECT word, note, date_added, status, last_review_result,
+               review_interval, last_review_date, next_review_date
+        FROM words"""]
 
             # Apply WHERE conditions if any exist
             if conditions:
@@ -459,7 +495,8 @@ class ReviewCommand(Command):
                 status = word_row['status']
 
                 print(f"\nWord {i}/{total_words}:")
-                print(f"{word}")
+                # print(f"{word}")
+                self._display_word_for_review(word_row)
 
                 # Get self-assessment from user
                 recall_correct = self._get_valid_recall_input()
