@@ -60,7 +60,15 @@ class DeleteCommand(Command):
                 content = f.read().strip()
                 if not content:  # Empty file
                     return []
-                return json.loads(content)
+
+                buffer = json.loads(content)
+
+                # Safety check - ensure buffer is a list
+                if not isinstance(buffer, list):
+                    print("Warning: Invalid undo buffer format (not a list). Starting with empty buffer.")
+                    return []
+
+                return buffer
         except json.JSONDecodeError:
             print("Warning: Invalid undo buffer format. Starting with empty buffer.")
             return []
@@ -182,10 +190,22 @@ class DeleteCommand(Command):
             # Append new deleted word to buffer
             undo_buffer.append(serializable_data)
 
+            # Apply size management to limit buffer growth (max 100 entries)
+            self.prune_undo_buffer(undo_buffer)
+
             # Save updated buffer
             self.save_undo_buffer(undo_buffer)
         except Exception as e:
             print(f"Warning: Could not store word for undo: {e}")
+
+    def prune_undo_buffer(self, undo_buffer):
+        """Limit the undo buffer to the most recent 100 entries."""
+        MAX_BUFFER_SIZE = 100
+
+        # If buffer exceeds maximum size, keep only the most recent entries
+        if len(undo_buffer) > MAX_BUFFER_SIZE:
+            # Keep the most recent MAX_BUFFER_SIZE entries (newest are at the end)
+            del undo_buffer[0:len(undo_buffer) - MAX_BUFFER_SIZE]
 
     def handle_batch_undo(self, conn, cursor, count):
         """Handle batch undo operation to restore multiple deleted words."""
