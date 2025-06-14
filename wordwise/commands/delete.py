@@ -1,4 +1,8 @@
+import json
+import os
 import sqlite3
+from pathlib import Path
+
 from .base import Command
 from wordwise.registry import register_command
 from wordwise.data.database import get_connection
@@ -6,9 +10,6 @@ from wordwise.data.database import get_connection
 
 @register_command
 class DeleteCommand(Command):
-    # Class-level variable to store the last deleted word's data
-    last_deleted_word = None
-
     @property
     def name(self):
         return "delete"
@@ -34,6 +35,12 @@ class DeleteCommand(Command):
             action="store_true",
             help="Skip confirmation prompt and delete words immediately"
         )
+
+    def get_undo_buffer_path(self):
+        """Get the path to the undo buffer JSON file (in the same directory as the database)."""
+        # Get database directory (same as wordwise.db)
+        buffer_path = "undo_buffer.json"
+        return buffer_path
 
     def execute(self, args):
         conn = None
@@ -106,24 +113,43 @@ class DeleteCommand(Command):
             print(f"Database error: {e}")
             if conn:
                 conn.rollback()
+        except json.JSONDecodeError:
+            print("Error processing undo buffer file.")
+        except Exception as e:
+            print(f"An unexpected error occurred: {e}")
         finally:
             if conn:
                 conn.close()
 
     def store_for_undo(self, word_data):
-        """Store the deleted word's data for potential undo."""
-        # If multiple words are deleted in sequence, only the last one can be undone
-        DeleteCommand.last_deleted_word = word_data
+        """Store the deleted word's data to JSON file for potential undo."""
+        try:
+            # Convert SQLite Row type values to JSON serializable format
+            serializable_data = {}
+            for key, value in word_data.items():
+                # Convert non-JSON serializable types if needed
+                serializable_data[key] = value
+
+            # Write the data to the JSON file
+            buffer_path = self.get_undo_buffer_path()
+            with open(buffer_path, 'w') as f:
+                json.dump(serializable_data, f, indent=2)
+        except Exception as e:
+            print(f"Warning: Could not store word for undo: {e}")
 
     def handle_undo(self, conn, cursor):
-        """Handle the undo operation to restore the last deleted word."""
-        if not DeleteCommand.last_deleted_word:
+        """Handle the undo operation to restore the last deleted word from JSON file."""
+        buffer_path = self.get_undo_buffer_path()
+
+        # Check if undo buffer file exists
+        if not os.path.exists(buffer_path) or os.path.getsize(buffer_path) == 0:
             print("No deletions to undo.")
             return
 
         try:
-            # Get the stored word data
-            word_data = DeleteCommand.last_deleted_word
+            # Load the stored word data from the JSON file
+            with open(buffer_path, 'r') as f:
+                word_data = json.load(f)
 
             # Check if the word already exists (might have been re-added)
             cursor.execute(
@@ -151,9 +177,25 @@ class DeleteCommand(Command):
 
             print(f"Restored word '{word_data['word']}' to the database.")
 
-            # Clear the undo buffer after successful restoration
-            DeleteCommand.last_deleted_word = None
+            # Clear the undo buffer file after successful restoration
+            self.clear_undo_buffer()
 
         except sqlite3.Error as e:
             print(f"Error during undo operation: {e}")
             conn.rollback()
+        except json.JSONDecodeError:
+            print("Error reading undo buffer: Invalid JSON format.")
+            # Clear the invalid buffer
+            self.clear_undo_buffer()
+        except Exception as e:
+            print(f"An unexpected error occurred during undo: {e}")
+
+    def clear_undo_buffer(self):
+        """Clear the undo buffer file."""
+        try:
+            buffer_path = self.get_undo_buffer_path()
+            # Simply truncate the file by opening it in write mode
+            with open(buffer_path, 'w') as f:
+                f.write("")
+        except Exception as e:
+            print(f"Warning: Could not clear undo buffer: {e}")
