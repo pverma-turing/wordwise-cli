@@ -20,6 +20,11 @@ class DeleteCommand(Command):
             nargs="+",
             help="One or more words to delete from the saved words database"
         )
+        parser.add_argument(
+            "--force",
+            action="store_true",
+            help="Skip confirmation prompt and delete words immediately"
+        )
 
     def execute(self, args):
         conn = None
@@ -50,13 +55,21 @@ class DeleteCommand(Command):
                     print(f"Word '{word}' not found in saved words.")
                     continue
 
-                # Get the exact word with correct case for confirmation
+                # Get the exact word with correct case for display
                 exact_word = result[0]
 
-                # Ask for confirmation
-                confirmation = input(f"Are you sure you want to delete '{exact_word}'? (y/n): ")
+                # Determine whether to delete based on --force flag or confirmation
+                proceed_with_deletion = False
 
-                if confirmation.lower() in ["y", "yes"]:
+                if args.force:
+                    # Skip confirmation if --force is specified
+                    proceed_with_deletion = True
+                else:
+                    # Ask for confirmation
+                    confirmation = input(f"Are you sure you want to delete '{exact_word}'? (y/n): ")
+                    proceed_with_deletion = confirmation.lower() in ["y", "yes"]
+
+                if proceed_with_deletion:
                     # Delete the word
                     cursor.execute(
                         "DELETE FROM words WHERE LOWER(word) = LOWER(?)",
