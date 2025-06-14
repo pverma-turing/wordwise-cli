@@ -62,6 +62,11 @@ class ReviewCommand(Command):
             action="store_true",
             help="Display a summary of words matching current filters without starting a review session"
         )
+        parser.add_argument(
+            '--reset-schedule',
+            action='store_true',
+            help='Reset scheduling information (intervals and dates) for selected words'
+        )
 
     def _has_column(self, cursor, table_name, column_name):
         """Check if the given column exists in the specified table."""
@@ -158,6 +163,42 @@ class ReviewCommand(Command):
             # Optionally, you could add more detailed error information for debugging
             import traceback
             print(traceback.format_exc())
+
+    def _reset_scheduling(self, cursor, words):
+        """
+        Reset scheduling fields for the selected words.
+        Sets review_interval to 1, and both last_review_date and next_review_date to today.
+
+        Args:
+            cursor: Database cursor
+            words: List of word strings to reset scheduling for
+        """
+        if not words:
+            return
+
+        # Calculate today's date
+        today = dt.now()
+        today_iso = today.isoformat()
+
+        reset_count = 0
+        for word in words:
+            try:
+                # Update each word individually for reliable parameter binding
+                cursor.execute(
+                    """UPDATE words 
+                       SET review_interval = 1, 
+                           last_review_date = ?, 
+                           next_review_date = ?
+                       WHERE word = ?""",
+                    (today_iso, today_iso, word)
+                )
+                reset_count += cursor.rowcount
+            except Exception as e:
+                # Log the error but continue with other words
+                print(f"Error resetting scheduling for word '{word}': {e}")
+
+        if reset_count > 0:
+            print(f"Reset scheduling for {reset_count} word(s).")
 
     def _check_for_pause(self):
         """Check if user wants to pause the session."""
@@ -290,6 +331,7 @@ class ReviewCommand(Command):
 
             # Build and execute the final query
             query = " ".join(query_parts)
+            print(query)
             cursor.execute(query, params)
             words = list(cursor.fetchall())  # Convert to list to support shuffling
 
@@ -299,6 +341,15 @@ class ReviewCommand(Command):
                 due_words_count = len(words)  # Already filtered to due words
             else:
                 due_words_count = self._get_due_words_count(cursor, has_next_review_date)
+
+            # After all filtering is done (due-only, limit, resume, etc.) but before review starts
+            print(args.reset_schedule, words)
+            if args.reset_schedule and words:
+                print(args.reset_schedule)
+                # Extract just the word strings from the word_data dictionaries
+                words_to_reset = [word_data['word'] for word_data in words]
+                self._reset_scheduling(cursor, words_to_reset)
+                conn.commit()
 
             # Check if there are any words to review
             if not words:
