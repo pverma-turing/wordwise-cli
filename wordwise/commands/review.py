@@ -8,6 +8,7 @@ from datetime import datetime as dt
 from wordwise.commands.base import Command
 from wordwise.data.database import get_connection
 from wordwise.registry import register_command
+from wordwise.services.scheduling import SchedulingService
 
 
 @register_command
@@ -112,60 +113,6 @@ class ReviewCommand(Command):
             print(f"Warning: Could not update review result for '{word}': {e}")
             return False
 
-    def _update_scheduling(self, cursor, word, recall_correct, max_interval=60):
-        """
-        Update spaced repetition scheduling parameters for a word after review.
-        Handles backward compatibility with records that may have NULL values
-        for the spaced repetition fields.
-
-        Args:
-            cursor: Database cursor
-            word: The word that was reviewed
-            recall_correct: Boolean indicating if the user recalled the word correctly
-            max_interval: Maximum review interval in days (default: 60)
-        """
-        try:
-            # Get the current review_interval
-            cursor.execute("SELECT review_interval FROM words WHERE word = ?", (word,))
-            result = cursor.fetchone()
-
-            # Handle case where review_interval might be NULL/None or record doesn't exist
-            if not result or result[0] is None:
-                # For backward compatibility, use default value 1
-                current_interval = 1
-            else:
-                current_interval = result[0]
-
-            # Update interval based on recall result
-            if recall_correct:
-                # Double the interval for correct recalls
-                new_interval = current_interval * 2
-            else:
-                # Reset to minimum for incorrect recalls
-                new_interval = 1
-
-            # Apply min/max caps using the configurable max_interval
-            new_interval = max(1, min(new_interval, max_interval))
-
-            # Calculate dates
-            today = dt.now()
-            today_iso = today.isoformat()
-            next_review = today + datetime.timedelta(days=new_interval)
-            next_review_iso = next_review.isoformat()
-
-            # Update the word with new scheduling information
-            cursor.execute(
-                """UPDATE words 
-                   SET review_interval = ?, 
-                       last_review_date = ?, 
-                       next_review_date = ?
-                   WHERE word = ?""",
-                (new_interval, today_iso, next_review_iso, word)
-            )
-        except Exception as e:
-            # Log the error but don't disrupt the review flow
-            print(f"Error updating scheduling for '{word}': {e}")
-
     def _reset_scheduling(self, cursor, words):
         """
         Reset scheduling fields for the selected words.
@@ -268,51 +215,6 @@ class ReviewCommand(Command):
 
         return cursor.fetchone()[0]
 
-    def _initialize_scheduling_fields(self, cursor):
-        """
-        Initialize spaced repetition scheduling fields for legacy records.
-        Finds all records with NULL scheduling fields and sets them to default values.
-
-        Args:
-            cursor: Database cursor
-        """
-        try:
-            # Calculate today's date
-            today = dt.now()
-            today_iso = today.isoformat()
-
-            # Find all records with missing scheduling data
-            # Using IS NULL to check for all three fields separately ensures we catch all variations
-            cursor.execute("""
-                SELECT word FROM words 
-                WHERE review_interval IS NULL 
-                   OR last_review_date IS NULL 
-                   OR next_review_date IS NULL
-            """)
-            legacy_words = [row[0] for row in cursor.fetchall()]
-
-            if not legacy_words:
-                return  # No legacy records to update
-
-            # Update all legacy records with default values
-            initialized_count = 0
-            for word in legacy_words:
-                cursor.execute("""
-                    UPDATE words
-                    SET review_interval = 1,
-                        last_review_date = ?,
-                        next_review_date = ?
-                    WHERE word = ?
-                """, (today_iso, today_iso, word))
-                initialized_count += cursor.rowcount
-
-            if initialized_count > 0:
-                print(f"Initialized scheduling data for {initialized_count} existing word(s).")
-
-        except Exception as e:
-            # Log the error but allow the review command to continue
-            print(f"Error initializing scheduling fields: {e}")
-
     def _display_word_for_review(self, word_data):
         """
         Display a word and its scheduling information during review.
@@ -377,8 +279,9 @@ class ReviewCommand(Command):
             conn.row_factory = sqlite3.Row  # Use Row factory to access columns by name
             cursor = conn.cursor()
 
-            # Initialize scheduling fields for legacy records
-            self._initialize_scheduling_fields(cursor)
+            initialized_count = SchedulingService.initialize_missing_fields(cursor)
+            if initialized_count > 0:
+                print(f"Initialized scheduling data for {initialized_count} existing word(s).")
             conn.commit()  # Commit these changes immediately for safety
 
             # Ensure the last_review_result column exists
@@ -507,7 +410,8 @@ class ReviewCommand(Command):
                     conn.commit()
                     words_reviewed += 1
 
-                self._update_scheduling(cursor, word, recall_correct, args.max_interval)
+                # Use the scheduling service for updating scheduling
+                SchedulingService.update_scheduling(cursor, word, recall_correct, args.max_interval)
 
                 if recall_correct:
                     correct_recalls += 1
