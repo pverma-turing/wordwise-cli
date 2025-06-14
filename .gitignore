@@ -6,3 +6,4 @@ wordwise/__pycache__/
 wordwise/commands/__pycache__/
 wordwise/data/__pycache__/
 wordwise/utils/__pycache__/
+wordwise/services/__pycache__/
