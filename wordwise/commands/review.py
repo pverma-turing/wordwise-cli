@@ -4,9 +4,11 @@ import sqlite3
 import sys
 from typing import List, Optional
 
+from datetime import datetime as dt
 from wordwise.commands.base import Command
 from wordwise.data.database import get_connection
 from wordwise.registry import register_command
+from wordwise.services.scheduling import SchedulingService
 
 
 @register_command
@@ -61,6 +63,17 @@ class ReviewCommand(Command):
             action="store_true",
             help="Display a summary of words matching current filters without starting a review session"
         )
+        parser.add_argument(
+            '--reset-schedule',
+            action='store_true',
+            help='Reset scheduling information (intervals and dates) for selected words'
+        )
+        parser.add_argument(
+            '--max-interval',
+            type=int,
+            default=60,
+            help='Maximum number of days between reviews (default: 60)'
+        )
 
     def _has_column(self, cursor, table_name, column_name):
         """Check if the given column exists in the specified table."""
@@ -99,6 +112,42 @@ class ReviewCommand(Command):
         except sqlite3.Error as e:
             print(f"Warning: Could not update review result for '{word}': {e}")
             return False
+
+    def _reset_scheduling(self, cursor, words):
+        """
+        Reset scheduling fields for the selected words.
+        Sets review_interval to 1, and both last_review_date and next_review_date to today.
+
+        Args:
+            cursor: Database cursor
+            words: List of word strings to reset scheduling for
+        """
+        if not words:
+            return
+
+        # Calculate today's date
+        today = dt.now()
+        today_iso = today.isoformat()
+
+        reset_count = 0
+        for word in words:
+            try:
+                # Update each word individually for reliable parameter binding
+                cursor.execute(
+                    """UPDATE words 
+                       SET review_interval = 1, 
+                           last_review_date = ?, 
+                           next_review_date = ?
+                       WHERE word = ?""",
+                    (today_iso, today_iso, word)
+                )
+                reset_count += cursor.rowcount
+            except Exception as e:
+                # Log the error but continue with other words
+                print(f"Error resetting scheduling for word '{word}': {e}")
+
+        if reset_count > 0:
+            print(f"Reset scheduling for {reset_count} word(s).")
 
     def _check_for_pause(self):
         """Check if user wants to pause the session."""
@@ -166,6 +215,40 @@ class ReviewCommand(Command):
 
         return cursor.fetchone()[0]
 
+    def _display_word_for_review(self, word_data):
+        """
+        Display a word and its scheduling information during review.
+
+        Args:
+            word_data: Dictionary containing word information
+        """
+        word = word_data['word']
+
+        # Display the word and note (existing functionality)
+        print(f"\nWord: {word}")
+        if word_data['note']:
+            print(f"Note: {word_data['note']}")
+
+        # Display scheduling information
+        interval = word_data['review_interval']
+        last_review = word_data['last_review_date']
+        next_review = word_data['next_review_date']
+
+        # Format the interval
+        if interval is None:
+            interval_display = "N/A"
+        else:
+            interval_display = f"{interval} day{'s' if interval != 1 else ''}"
+
+        # Format the dates, handling NULL values
+        last_review_display = "N/A" if last_review is None else last_review.split('T')[0]  # Show date part only
+        next_review_display = "N/A" if next_review is None else next_review.split('T')[0]  # Show date part only
+
+        # Display scheduling information
+        print(f"Current interval: {interval_display}")
+        print(f"Last reviewed: {last_review_display}")
+        print(f"Next review due: {next_review_display}")
+
     def _log_session(self, words_reviewed, correct_recalls, was_paused):
         """Log the review session to a file."""
         log_file = "review_sessions.log"
@@ -196,6 +279,11 @@ class ReviewCommand(Command):
             conn.row_factory = sqlite3.Row  # Use Row factory to access columns by name
             cursor = conn.cursor()
 
+            initialized_count = SchedulingService.initialize_missing_fields(cursor)
+            if initialized_count > 0:
+                print(f"Initialized scheduling data for {initialized_count} existing word(s).")
+            conn.commit()  # Commit these changes immediately for safety
+
             # Ensure the last_review_result column exists
             has_last_review_result = self._ensure_last_review_result_column(cursor)
             if has_last_review_result:
@@ -215,7 +303,9 @@ class ReviewCommand(Command):
             )
 
             # Build the query based on the arguments
-            query_parts = ["SELECT word, note, date_added, status, rowid FROM words"]
+            query_parts = ["""SELECT word, note, date_added, status, last_review_result,
+               review_interval, last_review_date, next_review_date
+        FROM words"""]
 
             # Apply WHERE conditions if any exist
             if conditions:
@@ -240,6 +330,13 @@ class ReviewCommand(Command):
                 due_words_count = len(words)  # Already filtered to due words
             else:
                 due_words_count = self._get_due_words_count(cursor, has_next_review_date)
+
+            # After all filtering is done (due-only, limit, resume, etc.) but before review starts
+            if args.reset_schedule and words:
+                # Extract just the word strings from the word_data dictionaries
+                words_to_reset = [word_data['word'] for word_data in words]
+                self._reset_scheduling(cursor, words_to_reset)
+                conn.commit()
 
             # Check if there are any words to review
             if not words:
@@ -301,7 +398,8 @@ class ReviewCommand(Command):
                 status = word_row['status']
 
                 print(f"\nWord {i}/{total_words}:")
-                print(f"{word}")
+                # print(f"{word}")
+                self._display_word_for_review(word_row)
 
                 # Get self-assessment from user
                 recall_correct = self._get_valid_recall_input()
@@ -311,6 +409,9 @@ class ReviewCommand(Command):
                 if update_success:
                     conn.commit()
                     words_reviewed += 1
+
+                # Use the scheduling service for updating scheduling
+                SchedulingService.update_scheduling(cursor, word, recall_correct, args.max_interval)
 
                 if recall_correct:
                     correct_recalls += 1
