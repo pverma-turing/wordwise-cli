@@ -68,6 +68,12 @@ class ExportCommand(Command):
             help="Output format (csv, markdown, or flashcard)"
         )
 
+        parser.add_argument(
+            "--fields",
+            type=str,
+            help="Comma-separated list of fields to export (word,note,status,date_added)"
+        )
+
     def _validate_date(self, date_str):
         """Validate that a date string is in YYYY-MM-DD format."""
         try:
@@ -76,41 +82,118 @@ class ExportCommand(Command):
         except ValueError:
             return False
 
-    def _write_csv_format(self, file_path, rows):
-        """Write data in CSV format."""
+    def _parse_fields(self, fields_arg):
+        """Parse and validate the fields argument, returning a list of valid field names."""
+        valid_fields = ["word", "note", "status", "date_added"]
+        default_fields = valid_fields.copy()
+
+        if not fields_arg:
+            return default_fields
+
+        selected_fields = [field.strip().lower() for field in fields_arg.split(',')]
+
+        # Validate fields
+        invalid_fields = [field for field in selected_fields if field not in valid_fields]
+        if invalid_fields:
+            raise ValueError(f"Invalid field(s): {', '.join(invalid_fields)}. "
+                             f"Valid fields are: {', '.join(valid_fields)}")
+
+        # Ensure at least one valid field
+        valid_selected = [field for field in selected_fields if field in valid_fields]
+        if not valid_selected:
+            raise ValueError(f"No valid fields selected. Valid fields are: {', '.join(valid_fields)}")
+
+        return valid_selected
+
+    def _write_csv_format(self, file_path, rows, fields):
+        """Write data in CSV format with only the selected fields."""
+        field_indices = {field: i for i, field in enumerate(["word", "note", "status", "date_added"])}
+        field_headers = {"word": "Word", "note": "Note", "status": "Status", "date_added": "Date Added"}
+
         with open(file_path, 'w', newline='', encoding='utf-8') as file:
             writer = csv.writer(file)
-            writer.writerow(['Word', 'Note', 'Status', 'Date Added'])
+            # Write selected field headers
+            headers = [field_headers[field] for field in fields]
+            writer.writerow(headers)
+
             for row in rows:
-                word, note, status, date_added = row
-                note = note if note is not None else ""
-                writer.writerow([word, note, status, date_added])
+                # Extract only the selected fields from each row
+                values = []
+                for field in fields:
+                    idx = field_indices[field]
+                    value = row[idx]
+                    # Handle null values
+                    if field == "note" and value is None:
+                        value = ""
+                    values.append(value)
+                writer.writerow(values)
+
         return len(rows)
 
-    def _write_markdown_format(self, file_path, rows):
-        """Write data in Markdown table format."""
+    def _write_markdown_format(self, file_path, rows, fields):
+        """Write data in Markdown table format with only the selected fields."""
+        field_indices = {field: i for i, field in enumerate(["word", "note", "status", "date_added"])}
+        field_headers = {"word": "Word", "note": "Note", "status": "Status", "date_added": "Date Added"}
+
         with open(file_path, 'w', encoding='utf-8') as file:
-            # Write markdown table header
-            file.write("| Word | Note | Status | Date Added |\n")
-            file.write("|------|------|--------|------------|\n")
-            # Write data rows
+            # Write markdown table header with selected fields
+            header_row = "| " + " | ".join([field_headers[field] for field in fields]) + " |"
+            file.write(header_row + "\n")
+
+            # Write the separator line with correct number of columns
+            separator = "|" + "|".join(["---" for _ in fields]) + "|"
+            file.write(separator + "\n")
+
+            # Write data rows with only the selected fields
             for row in rows:
-                word, note, status, date_added = row
-                note = note if note is not None else ""
-                # Escape pipe characters in values for markdown table
-                word = word.replace("|", "\\|")
-                note = note.replace("|", "\\|")
-                status = status.replace("|", "\\|")
-                file.write(f"| {word} | {note} | {status} | {date_added} |\n")
+                values = []
+                for field in fields:
+                    idx = field_indices[field]
+                    value = row[idx]
+                    # Handle null values
+                    if field == "note" and value is None:
+                        value = ""
+                    # Escape pipe characters for markdown
+                    if value is not None:
+                        value = str(value).replace("|", "\\|")
+                    values.append(value)
+                file.write("| " + " | ".join(values) + " |\n")
+
         return len(rows)
 
-    def _write_flashcard_format(self, file_path, rows):
-        """Write data in simple flashcard text format."""
+    def _write_flashcard_format(self, file_path, rows, fields):
+        """Write data in flashcard format using only the selected fields."""
+        field_indices = {field: i for i, field in enumerate(["word", "note", "status", "date_added"])}
+        field_headers = {"word": "Word", "note": "Note", "status": "Status", "date_added": "Date Added"}
+
         with open(file_path, 'w', encoding='utf-8') as file:
             for row in rows:
-                word, note, status, date_added = row
-                note = note if note is not None else ""
-                file.write(f"{word}: {note} [{status}]\n")
+                # Build flashcard format based on available fields
+                parts = []
+
+                # Always start with word if it's selected (or default to first selected field)
+                if "word" in fields:
+                    parts.append(row[field_indices["word"]])
+                elif fields:  # If word is not selected, use the first selected field
+                    first_field = fields[0]
+                    parts.append(f"{field_headers[first_field]}: {row[field_indices[first_field]]}")
+
+                # Add remaining fields with labels
+                remaining_fields = [f for f in fields if f != "word" and
+                                    (f != fields[0] or "word" in fields)]
+
+                for field in remaining_fields:
+                    idx = field_indices[field]
+                    value = row[idx]
+                    if field == "note" and value is None:
+                        value = ""
+                    if field == "status":
+                        parts.append(f"[{value}]")
+                    else:
+                        parts.append(f"{field}: {value}")
+
+                file.write(" - ".join(parts) + "\n")
+
         return len(rows)
 
     def execute(self, args):
@@ -126,6 +209,13 @@ class ExportCommand(Command):
         # Add date logical validation: from_date should be before to_date
         if args.from_date and args.to_date and args.from_date > args.to_date:
             print(f"Error: --from-date ({args.from_date}) must be on or before --to-date ({args.to_date}).")
+            return
+
+        # Parse and validate fields
+        try:
+            selected_fields = self._parse_fields(args.fields)
+        except ValueError as e:
+            print(f"Error: {e}")
             return
 
         # Check if the target directory exists
@@ -155,7 +245,8 @@ class ExportCommand(Command):
                 print("No saved words database found.")
                 return
 
-            # Build query with multiple potential conditions
+            # Always fetch all fields from the database for consistency
+            # Field selection will be applied at the output stage
             query = "SELECT word, note, status, date_added FROM words"
             conditions = []
             params = []
@@ -207,13 +298,13 @@ class ExportCommand(Command):
                 print(f"No words found{filter_msg} to export.")
                 return
 
-            # Write data in the selected format
+            # Write data in the selected format, using only the selected fields
             if args.format == "csv":
-                row_count = self._write_csv_format(file_path, rows)
+                row_count = self._write_csv_format(file_path, rows, selected_fields)
             elif args.format == "markdown":
-                row_count = self._write_markdown_format(file_path, rows)
+                row_count = self._write_markdown_format(file_path, rows, selected_fields)
             elif args.format == "flashcard":
-                row_count = self._write_flashcard_format(file_path, rows)
+                row_count = self._write_flashcard_format(file_path, rows, selected_fields)
 
             # Build detailed filter message for success output
             filter_parts = []
@@ -230,13 +321,20 @@ class ExportCommand(Command):
             if filter_parts:
                 filter_msg = f" (filtered by: {', '.join(filter_parts)})"
 
-            # Include format in success message
-            print(f"Successfully exported {row_count} words{filter_msg} to {args.file} in {args.format.upper()} format")
+            # Include format and fields info in success message
+            fields_msg = ""
+            if len(selected_fields) < 4:  # Only mention fields if not all fields are selected
+                fields_msg = f" with fields: {', '.join(selected_fields)}"
+
+            print(
+                f"Successfully exported {row_count} words{filter_msg} to {args.file} in {args.format.upper()} format{fields_msg}")
 
         except sqlite3.Error as e:
             print(f"Database error: {e}")
         except PermissionError:
             print(f"Error: Permission denied when writing to {args.file}")
+        except ValueError as e:
+            print(f"Error with field selection: {e}")
         except Exception as e:
             print(f"An unexpected error occurred: {e}")
         finally:
