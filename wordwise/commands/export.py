@@ -81,6 +81,12 @@ class ExportCommand(Command):
             help="File encoding (e.g., utf-8, utf-16, ascii); defaults to utf-8"
         )
 
+        parser.add_argument(
+            "--dry-run",
+            action="store_true",
+            help="Show what would be exported without writing any file"
+        )
+
     def _validate_date(self, date_str):
         """Validate that a date string is in YYYY-MM-DD format."""
         try:
@@ -244,15 +250,15 @@ class ExportCommand(Command):
         file_path = Path(args.file)
         directory = file_path.parent
 
-        if not os.path.exists(directory):
+        if not args.dry_run and not os.path.exists(directory):
             print(f"Error: Directory {directory} does not exist.")
             return
 
-        # Check if file exists and confirm overwrite
-        if os.path.exists(file_path):
+        # Check if file exists and confirm overwrite (skip in dry-run mode)
+        if not args.dry_run and os.path.exists(file_path):
             confirmation = input(f"File {args.file} already exists. Overwrite? (y/n): ")
             if confirmation.lower() not in ["y", "yes"]:
-                print("Export cancelled. Please try again")
+                print("Export cancelled.")
                 return
 
         conn = None
@@ -320,13 +326,6 @@ class ExportCommand(Command):
                 print(f"No words found{filter_msg} to export.")
                 return
 
-            # Write data in the selected format, using only the selected fields
-            if args.format == "csv":
-                row_count = self._write_csv_format(file_path, rows, selected_fields, args.encoding)
-            elif args.format == "markdown":
-                row_count = self._write_markdown_format(file_path, rows, selected_fields, args.encoding)
-            elif args.format == "flashcard":
-                row_count = self._write_flashcard_format(file_path, rows, selected_fields, args.encoding)
 
             # Build detailed filter message for success output
             filter_parts = []
@@ -348,8 +347,33 @@ class ExportCommand(Command):
             if len(selected_fields) < 4:  # Only mention fields if not all fields are selected
                 fields_msg = f" with fields: {', '.join(selected_fields)}"
 
+            row_count = len(rows)
+            if args.dry_run:
+                print(f"DRY RUN: Would export {row_count} words{filter_msg}")
+                print(f"Format:   {args.format.upper()}")
+
+                if fields_msg:
+                    print(f"Fields:   {', '.join(selected_fields)}")
+                else:
+                    print(f"Fields:   All fields (word, note, status, date_added)")
+
+                print(f"Encoding: {args.encoding}")
+                print(f"File:     {args.file}")
+                print("No files were written (dry run mode)")
+                return
+
+            else:
+                # Write data in the selected format, using only the selected fields
+                if args.format == "csv":
+                    row_count = self._write_csv_format(file_path, rows, selected_fields, args.encoding)
+                elif args.format == "markdown":
+                    row_count = self._write_markdown_format(file_path, rows, selected_fields, args.encoding)
+                elif args.format == "flashcard":
+                    row_count = self._write_flashcard_format(file_path, rows, selected_fields, args.encoding)
+
             print(
                 f"Successfully exported {row_count} words{filter_msg} to {args.file} in {args.format.upper()} format{fields_msg}")
+
 
         except sqlite3.Error as e:
             print(f"Database error: {e}")
