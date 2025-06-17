@@ -3,9 +3,11 @@ Implementation of the 'export' command for WordWise CLI that exports saved words
 to a CSV file.
 """
 import os
+import sqlite3
 import sys
 import csv
 from datetime import datetime
+from pathlib import Path
 
 from .base import Command
 from wordwise.data.database import get_connection
@@ -33,59 +35,80 @@ class ExportCommand(Command):
             required=True,
             help="Path to the export CSV file"
         )
+        parser.add_argument(
+            "--status",
+            choices=["all", "learned", "to-review"],
+            default="all",
+            help="Filter words by learning status (all, learned, or to-review)"
+        )
 
     def execute(self, args):
-        """Execute the export command."""
-        # Create database directory if it doesn't exist
+        # Check if the target directory exists
+        file_path = Path(args.file)
+        directory = file_path.parent
 
-        # Validate file path is not empty
-        if not args.file or args.file.strip() == "":
-            print("Error: Export file path cannot be empty.")
+        if not directory.exists():
+            print(f"Error: Directory {directory} does not exist.")
             return
 
-        # Check if the directory is writable before proceeding
-        file_dir = os.path.dirname(args.file) or '.'
-        if not os.access(file_dir, os.W_OK):
-            print(f"Cannot write to file '{args.file}'. Check directory permissions and try again.")
-            sys.exit(1)
+        # Check if file exists and confirm overwrite
+        if file_path.exists():
+            confirmation = input(f"File {args.file} already exists. Overwrite? (y/n): ")
+            if confirmation.lower() not in ["y", "yes"]:
+                print("Export cancelled.")
+                return
 
-        conn = get_connection()
-        cursor = conn.cursor()
-
-        # Query all words from the database
-        cursor.execute('SELECT word, note, status, date_added FROM words ORDER BY word ASC')
-        rows = cursor.fetchall()
-
-        # Close database connection
-        conn.close()
-
-        if not rows:
-            print("No saved words to export.")
-            return
-
-        # Export words to CSV file
         try:
-            with open(args.file, 'w', newline='', encoding='utf-8') as csvfile:
-                writer = csv.writer(csvfile)
+            # Connect to the database
+            conn = get_connection()
+            cursor = conn.cursor()
+
+            # Build and execute query with optional status filtering
+            query = "SELECT word, note, status, date_added FROM words"
+
+            # Apply filtering directly at SQL query level for efficiency
+            if args.status != "all":
+                query += " WHERE status = ?"
+                cursor.execute(query, (args.status,))
+            else:
+                cursor.execute(query)
+
+            # Fetch all results
+            rows = cursor.fetchall()
+
+            # If no rows found, inform user and exit
+            if not rows:
+                status_msg = f" with status '{args.status}'" if args.status != "all" else ""
+                print(f"No words{status_msg} found to export.")
+                return
+
+            # Write data to CSV file
+            with open(file_path, 'w', newline='', encoding='utf-8') as csv_file:
+                csv_writer = csv.writer(csv_file)
 
                 # Write header row
-                writer.writerow(['Word', 'Note', 'Status', 'Date Added'])
+                csv_writer.writerow(['Word', 'Note', 'Status', 'Date Added'])
 
                 # Write data rows
-                for word, note, status, date_added in rows:
-                    # Format date for display (keeping only the date part)
-                    try:
-                        display_date = datetime.fromisoformat(date_added).strftime("%Y-%m-%d")
-                    except (ValueError, TypeError):
-                        display_date = date_added  # Fallback to original string if parsing fails
+                row_count = 0
+                for row in rows:
+                    word, note, status, date_added = row
+                    # Handle None values for note
+                    note = note if note is not None else ""
 
-                    # Handle None values in notes
-                    note_display = note if note else ""
+                    csv_writer.writerow([word, note, status, date_added])
+                    row_count += 1
 
-                    writer.writerow([word, note_display, status, display_date])
+            # Provide success message that indicates when filtering was applied
+            status_msg = f" with status '{args.status}'" if args.status != "all" else ""
+            print(f"Successfully exported {row_count} words{status_msg} to {args.file}")
 
-                print(f"Successfully exported {len(rows)} words to {args.file}")
-
-        except IOError as e:
-            print(f"Error exporting to file '{args.file}': {e}")
-            sys.exit(1)
+        except sqlite3.Error as e:
+            print(f"Database error: {e}")
+        except PermissionError:
+            print(f"Error: Permission denied when writing to {args.file}")
+        except Exception as e:
+            print(f"An unexpected error occurred: {e}")
+        finally:
+            if conn:
+                conn.close()
