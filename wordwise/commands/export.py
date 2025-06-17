@@ -252,7 +252,7 @@ class ExportCommand(Command):
         if os.path.exists(file_path):
             confirmation = input(f"File {args.file} already exists. Overwrite? (y/n): ")
             if confirmation.lower() not in ["y", "yes"]:
-                print("Export cancelled.")
+                print("Export cancelled. Please try again")
                 return
 
         conn = None
