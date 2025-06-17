@@ -2,6 +2,7 @@
 Implementation of the 'export' command for WordWise CLI that exports saved words
 to a CSV file.
 """
+import json
 import os
 import sqlite3
 import sys
@@ -17,7 +18,8 @@ from wordwise.registry import register_command
 @register_command
 class ExportCommand(Command):
     """Command to export saved words to a CSV file."""
-
+    PRESET_DIR = Path.home() / ".wordwise" / "presets"
+    PRESET_FILE = PRESET_DIR / "export_presets.json"
     @property
     def name(self):
         """Return the command name."""
@@ -29,19 +31,99 @@ class ExportCommand(Command):
         return "Export saved words to a CSV file"
 
     def add_arguments(self, parser):
-        """Add command-specific arguments."""
+        # Create subparsers for export commands
+        subparsers = parser.add_subparsers(dest="export_command", help="Export command to run")
+
+        # Create the default export parser (standard export functionality)
+        export_parser = subparsers.add_parser("export", help="Export words to a file")
+        self._add_export_arguments(export_parser)
+
+        # Create the save-preset parser
+        save_preset_parser = subparsers.add_parser("save-preset", help="Save current export settings as a preset")
+        self._add_export_arguments(save_preset_parser)  # Same args as export
+        save_preset_parser.add_argument(
+            "preset_name",
+            help="Name of the preset to save"
+        )
+
+        # Create the run-preset parser
+        run_preset_parser = subparsers.add_parser("run-preset", help="Run a previously saved export preset")
+        run_preset_parser.add_argument(
+            "preset_name",
+            help="Name of the preset to run"
+        )
+        run_preset_parser.add_argument(
+            "--dry-run",
+            action="store_true",
+            help="Show what would be exported without writing any file"
+        )
+
+        # Create the list-presets parser
+        list_presets_parser = subparsers.add_parser("list-presets", help="List all available export presets")
+        list_presets_parser.add_argument(
+            "--verbose", "-v",
+            action="store_true",
+            help="Show detailed preset configurations"
+        )
+
+        # Add arguments to the default parser as well (for backward compatibility)
+        self._add_export_arguments(parser)
+
+    def _add_export_arguments(self, parser):
+        """Add all export-related arguments to the given parser."""
+        # Existing file argument
         parser.add_argument(
             "--file",
-            required=True,
-            help="Path to the export CSV file"
+            required=False,
+            help="Path to the file where words will be exported"
         )
+
+        # Format selection argument
+        parser.add_argument(
+            "--format",
+            choices=["csv", "markdown", "flashcard"],
+            default="csv",
+            help="Output format (csv, markdown, or flashcard)"
+        )
+
+        # Field selection argument
+        parser.add_argument(
+            "--fields",
+            type=str,
+            help="Comma-separated list of fields to export (word,note,status,date_added)"
+        )
+
+        # Encoding argument
+        parser.add_argument(
+            "--encoding",
+            type=str,
+            default="utf-8",
+            help="File encoding (e.g., utf-8, utf-16, ascii); defaults to utf-8"
+        )
+
+        # Dry-run argument
+        parser.add_argument(
+            "--dry-run",
+            action="store_true",
+            help="Show what would be exported without writing any file"
+        )
+
+        # Append argument
+        parser.add_argument(
+            "--append",
+            action="store_true",
+            help="Append to existing file instead of overwriting it"
+        )
+
+        # Status filter argument
         parser.add_argument(
             "--status",
             choices=["all", "learned", "to-review"],
             default="all",
             help="Filter words by learning status (all, learned, or to-review)"
         )
-        # New date range filter arguments
+
+        # Date range filter arguments
         parser.add_argument(
             "--from-date",
             type=str,
@@ -54,44 +136,12 @@ class ExportCommand(Command):
             help="Export words added on or before this date (YYYY-MM-DD)"
         )
 
-        # New text search argument
+        # Text search argument
         parser.add_argument(
             "--search",
             type=str,
             help="Export only words containing this text (case-insensitive)"
         )
-
-        parser.add_argument(
-            "--format",
-            choices=["csv", "markdown", "flashcard"],
-            default="csv",
-            help="Output format (csv, markdown, or flashcard)"
-        )
-
-        parser.add_argument(
-            "--fields",
-            type=str,
-            help="Comma-separated list of fields to export (word,note,status,date_added)"
-        )
-
-        parser.add_argument(
-            "--encoding",
-            type=str,
-            default="utf-8",
-            help="File encoding (e.g., utf-8, utf-16, ascii); defaults to utf-8"
-        )
-
-        parser.add_argument(
-            "--dry-run",
-            action="store_true",
-            help="Show what would be exported without writing any file"
-        )
-        parser.add_argument(
-            "--append",
-            action="store_true",
-            help="Append to existing file instead of overwriting it"
-        )
-
     def _validate_date(self, date_str):
         """Validate that a date string is in YYYY-MM-DD format."""
         try:
@@ -225,7 +275,220 @@ class ExportCommand(Command):
         except (LookupError, UnicodeEncodeError, UnicodeDecodeError):
             return False
 
+    def _load_presets(self):
+        """Load export presets from the JSON file."""
+        # Ensure the preset directory exists
+        self.PRESET_DIR.mkdir(parents=True, exist_ok=True)
+
+        if not self.PRESET_FILE.exists():
+            return {}
+
+        try:
+            with open(self.PRESET_FILE, 'r') as f:
+                return json.load(f)
+        except json.JSONDecodeError:
+            print(f"Warning: Preset file is corrupted. Starting with empty presets.")
+            return {}
+        except Exception as e:
+            print(f"Error loading presets: {e}")
+            return {}
+
+    def _save_presets(self, presets):
+        """Save export presets to the JSON file."""
+        # Ensure the preset directory exists
+        self.PRESET_DIR.mkdir(parents=True, exist_ok=True)
+
+        try:
+            with open(self.PRESET_FILE, 'w') as f:
+                json.dump(presets, f, indent=2)
+            return True
+        except Exception as e:
+            print(f"Error saving presets: {e}")
+            return False
+
+    def _get_preset_config(self, args):
+        """Extract export configuration from args for saving as a preset."""
+        # Include all export-related settings
+        config = {
+            "file": args.file,
+            "format": args.format,
+            "encoding": args.encoding,
+            "append": args.append,
+            "status": args.status,
+        }
+
+        # Include optional arguments only if specified
+        if args.fields:
+            config["fields"] = args.fields
+        if args.from_date:
+            config["from_date"] = args.from_date
+        if args.to_date:
+            config["to_date"] = args.to_date
+        if args.search:
+            config["search"] = args.search
+
+        return config
+
+    def _create_args_from_preset(self, preset_config, override_args=None):
+        """Create an args namespace from a preset configuration.
+
+        If override_args is provided, those values will override the preset values.
+        """
+        from argparse import Namespace
+
+        # Create args from preset
+        args = Namespace()
+        for key, value in preset_config.items():
+            setattr(args, key, value)
+
+        # Apply any overrides
+        if override_args:
+            for key, value in vars(override_args).items():
+                # Only override if the value is not None (explicitly set)
+                if hasattr(override_args, key) and value is not None:
+                    setattr(args, key, value)
+
+        return args
+
+    def _save_preset(self, args):
+        """Save the current export settings as a preset."""
+        preset_name = args.preset_name
+
+        # Load existing presets
+        presets = self._load_presets()
+
+        # Extract export config from args
+        preset_config = self._get_preset_config(args)
+
+        # Check if preset already exists
+        if preset_name in presets:
+            confirmation = input(f"Preset '{preset_name}' already exists. Overwrite? (y/n): ")
+            if confirmation.lower() not in ["y", "yes"]:
+                print("Save preset cancelled.")
+                return False
+
+        # Save the preset
+        presets[preset_name] = preset_config
+        if self._save_presets(presets):
+            print(f"Preset '{preset_name}' saved successfully.")
+            return True
+        else:
+            print(f"Failed to save preset '{preset_name}'.")
+            return False
+
+    def _run_preset(self, args):
+        """Run a previously saved export preset."""
+        preset_name = args.preset_name
+
+        # Load existing presets
+        presets = self._load_presets()
+
+        # Check if preset exists
+        if preset_name not in presets:
+            print(f"Error: Preset '{preset_name}' not found.")
+            # Show available presets to help the user
+            self._list_presets(args, show_header=True)
+            return False
+
+        # Get preset configuration
+        preset_config = presets[preset_name]
+
+        # Create args from preset config, overriding with any explicit arguments
+        preset_args = self._create_args_from_preset(preset_config, args)
+
+        # Set export_command to ensure it's processed as a standard export
+        preset_args.export_command = None
+
+        # Run the export with the preset args
+        return self._run_export(preset_args)
+
+    def _list_presets(self, args, show_header=False):
+        """List all available export presets."""
+        # Load existing presets
+        presets = self._load_presets()
+
+        # Check if there are any presets
+        if not presets:
+            print("No export presets found.")
+            return True
+
+        # Show presets
+        if show_header:
+            print("\nAvailable export presets:")
+        else:
+            print("\nExport presets:")
+
+        # Sort preset names for consistent display
+        preset_names = sorted(presets.keys())
+
+        if not hasattr(args, 'verbose') or not args.verbose:
+            # Simple list view
+            for name in preset_names:
+                preset = presets[name]
+                format_type = preset.get('format', 'csv').upper()
+                file_path = preset.get('file', 'N/A')
+                print(f"  {name}: {format_type} -> {file_path}")
+        else:
+            # Verbose view with all settings
+            for name in preset_names:
+                preset = presets[name]
+                print(f"\n  {name}:")
+
+                # Display each setting with proper formatting
+                print(f"    File: {preset.get('file', 'N/A')}")
+                print(f"    Format: {preset.get('format', 'csv').upper()}")
+
+                if 'fields' in preset:
+                    print(f"    Fields: {preset['fields']}")
+                else:
+                    print(f"    Fields: All fields")
+
+                print(f"    Encoding: {preset.get('encoding', 'utf-8')}")
+                print(f"    Append mode: {'Yes' if preset.get('append', False) else 'No'}")
+
+                # Show filters
+                filters = []
+                if preset.get('status', 'all') != 'all':
+                    filters.append(f"status='{preset['status']}'")
+                if preset.get('from_date'):
+                    filters.append(f"from={preset['from_date']}")
+                if preset.get('to_date'):
+                    filters.append(f"to={preset['to_date']}")
+                if preset.get('search'):
+                    filters.append(f"search='{preset['search']}'")
+
+                if filters:
+                    print(f"    Filters: {', '.join(filters)}")
+                else:
+                    print(f"    Filters: None")
+
+        return True
+
+    def _run_export(self, args):
+        # Check if the target directory exists (skip in dry-run mode)
+        file_path = Path(args.file)
+        directory = file_path.parent
+
+        if not args.dry_run and not os.path.exists(directory):
+            print(f"Error: Directory {directory} does not exist.")
+            return
+
     def execute(self, args):
+        # Check if a subcommand was specified
+        if hasattr(args, 'export_command') and args.export_command:
+            if args.export_command == "export":
+                # Standard export with explicit subcommand
+                return self._run_export(args)
+            elif args.export_command == "save-preset":
+                # Save current settings as a preset
+                return self._save_preset(args)
+            elif args.export_command == "run-preset":
+                # Run a saved preset
+                return self._run_preset(args)
+            elif args.export_command == "list-presets":
+                # List all available presets
+                return self._list_presets(args)
+
         # Validate date formats if provided
         if args.from_date and not self._validate_date(args.from_date):
             print(f"Error: Invalid date format for --from-date. Use YYYY-MM-DD.")
