@@ -86,6 +86,11 @@ class ExportCommand(Command):
             action="store_true",
             help="Show what would be exported without writing any file"
         )
+        parser.add_argument(
+            "--append",
+            action="store_true",
+            help="Append to existing file instead of overwriting it"
+        )
 
     def _validate_date(self, date_str):
         """Validate that a date string is in YYYY-MM-DD format."""
@@ -118,12 +123,13 @@ class ExportCommand(Command):
 
         return valid_selected
 
-    def _write_csv_format(self, file_path, rows, fields, encoding='utf-8'):
+    def _write_csv_format(self, file_path, rows, fields, encoding='utf-8', append=False):
         """Write data in CSV format with only the selected fields."""
         field_indices = {field: i for i, field in enumerate(["word", "note", "status", "date_added"])}
         field_headers = {"word": "Word", "note": "Note", "status": "Status", "date_added": "Date Added"}
-
-        with open(file_path, 'w', newline='', encoding=encoding) as file:
+        file_exists = os.path.exists(file_path)
+        mode = 'a' if append and file_exists else 'w'
+        with open(file_path, mode, newline='', encoding=encoding) as file:
             writer = csv.writer(file)
             # Write selected field headers
             headers = [field_headers[field] for field in fields]
@@ -143,12 +149,13 @@ class ExportCommand(Command):
 
         return len(rows)
 
-    def _write_markdown_format(self, file_path, rows, fields, encoding="utf-8"):
+    def _write_markdown_format(self, file_path, rows, fields, encoding="utf-8", append=False):
         """Write data in Markdown table format with only the selected fields."""
         field_indices = {field: i for i, field in enumerate(["word", "note", "status", "date_added"])}
         field_headers = {"word": "Word", "note": "Note", "status": "Status", "date_added": "Date Added"}
-
-        with open(file_path, 'w', encoding=encoding) as file:
+        file_exists = os.path.exists(file_path)
+        mode = 'a' if append and file_exists else 'w'
+        with open(file_path, mode, encoding=encoding) as file:
             # Write markdown table header with selected fields
             header_row = "| " + " | ".join([field_headers[field] for field in fields]) + " |"
             file.write(header_row + "\n")
@@ -174,12 +181,13 @@ class ExportCommand(Command):
 
         return len(rows)
 
-    def _write_flashcard_format(self, file_path, rows, fields, encoding="utf-8"):
+    def _write_flashcard_format(self, file_path, rows, fields, encoding="utf-8", append=False):
         """Write data in flashcard format using only the selected fields."""
         field_indices = {field: i for i, field in enumerate(["word", "note", "status", "date_added"])}
         field_headers = {"word": "Word", "note": "Note", "status": "Status", "date_added": "Date Added"}
-
-        with open(file_path, 'w', encoding=encoding) as file:
+        file_exists = os.path.exists(file_path)
+        mode = 'a' if append and file_exists else 'w'
+        with open(file_path, mode, encoding=encoding) as file:
             for row in rows:
                 # Build flashcard format based on available fields
                 parts = []
@@ -255,11 +263,18 @@ class ExportCommand(Command):
             return
 
         # Check if file exists and confirm overwrite (skip in dry-run mode)
-        if not args.dry_run and os.path.exists(file_path):
-            confirmation = input(f"File {args.file} already exists. Overwrite? (y/n): ")
-            if confirmation.lower() not in ["y", "yes"]:
-                print("Export cancelled.")
-                return
+        file_exists = os.path.exists(file_path)
+
+        if not args.dry_run and file_exists:
+            if args.append:
+                # In append mode, no confirmation needed
+                pass
+            else:
+                # In overwrite mode, confirm before proceeding
+                confirmation = input(f"File {args.file} already exists. Overwrite? (y/n): ")
+                if confirmation.lower() not in ["y", "yes"]:
+                    print("Export cancelled.")
+                    return
 
         conn = None
         try:
@@ -365,11 +380,11 @@ class ExportCommand(Command):
             else:
                 # Write data in the selected format, using only the selected fields
                 if args.format == "csv":
-                    row_count = self._write_csv_format(file_path, rows, selected_fields, args.encoding)
+                    row_count = self._write_csv_format(file_path, rows, selected_fields, args.encoding, args.append)
                 elif args.format == "markdown":
-                    row_count = self._write_markdown_format(file_path, rows, selected_fields, args.encoding)
+                    row_count = self._write_markdown_format(file_path, rows, selected_fields, args.encoding, args.append)
                 elif args.format == "flashcard":
-                    row_count = self._write_flashcard_format(file_path, rows, selected_fields, args.encoding)
+                    row_count = self._write_flashcard_format(file_path, rows, selected_fields, args.encoding, args.append)
 
             print(
                 f"Successfully exported {row_count} words{filter_msg} to {args.file} in {args.format.upper()} format{fields_msg}")
