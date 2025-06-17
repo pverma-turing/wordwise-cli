@@ -74,6 +74,13 @@ class ExportCommand(Command):
             help="Comma-separated list of fields to export (word,note,status,date_added)"
         )
 
+        parser.add_argument(
+            "--encoding",
+            type=str,
+            default="utf-8",
+            help="File encoding (e.g., utf-8, utf-16, ascii); defaults to utf-8"
+        )
+
     def _validate_date(self, date_str):
         """Validate that a date string is in YYYY-MM-DD format."""
         try:
@@ -105,12 +112,12 @@ class ExportCommand(Command):
 
         return valid_selected
 
-    def _write_csv_format(self, file_path, rows, fields):
+    def _write_csv_format(self, file_path, rows, fields, encoding='utf-8'):
         """Write data in CSV format with only the selected fields."""
         field_indices = {field: i for i, field in enumerate(["word", "note", "status", "date_added"])}
         field_headers = {"word": "Word", "note": "Note", "status": "Status", "date_added": "Date Added"}
 
-        with open(file_path, 'w', newline='', encoding='utf-8') as file:
+        with open(file_path, 'w', newline='', encoding=encoding) as file:
             writer = csv.writer(file)
             # Write selected field headers
             headers = [field_headers[field] for field in fields]
@@ -130,12 +137,12 @@ class ExportCommand(Command):
 
         return len(rows)
 
-    def _write_markdown_format(self, file_path, rows, fields):
+    def _write_markdown_format(self, file_path, rows, fields, encoding="utf-8"):
         """Write data in Markdown table format with only the selected fields."""
         field_indices = {field: i for i, field in enumerate(["word", "note", "status", "date_added"])}
         field_headers = {"word": "Word", "note": "Note", "status": "Status", "date_added": "Date Added"}
 
-        with open(file_path, 'w', encoding='utf-8') as file:
+        with open(file_path, 'w', encoding=encoding) as file:
             # Write markdown table header with selected fields
             header_row = "| " + " | ".join([field_headers[field] for field in fields]) + " |"
             file.write(header_row + "\n")
@@ -161,12 +168,12 @@ class ExportCommand(Command):
 
         return len(rows)
 
-    def _write_flashcard_format(self, file_path, rows, fields):
+    def _write_flashcard_format(self, file_path, rows, fields, encoding="utf-8"):
         """Write data in flashcard format using only the selected fields."""
         field_indices = {field: i for i, field in enumerate(["word", "note", "status", "date_added"])}
         field_headers = {"word": "Word", "note": "Note", "status": "Status", "date_added": "Date Added"}
 
-        with open(file_path, 'w', encoding='utf-8') as file:
+        with open(file_path, 'w', encoding=encoding) as file:
             for row in rows:
                 # Build flashcard format based on available fields
                 parts = []
@@ -196,6 +203,14 @@ class ExportCommand(Command):
 
         return len(rows)
 
+    def _validate_encoding(self, encoding):
+        """Validate that the specified encoding is supported by Python."""
+        try:
+            "test".encode(encoding).decode(encoding)
+            return True
+        except (LookupError, UnicodeEncodeError, UnicodeDecodeError):
+            return False
+
     def execute(self, args):
         # Validate date formats if provided
         if args.from_date and not self._validate_date(args.from_date):
@@ -210,6 +225,13 @@ class ExportCommand(Command):
         if args.from_date and args.to_date and args.from_date > args.to_date:
             print(f"Error: --from-date ({args.from_date}) must be on or before --to-date ({args.to_date}).")
             return
+
+        if not self._validate_encoding(args.encoding):
+            print(f"Error: '{args.encoding}' is not a valid encoding.")
+            return
+
+        if args.encoding != "utf-8":  # Only mention encoding if not default
+            print(f" using {args.encoding} encoding")
 
         # Parse and validate fields
         try:
@@ -300,11 +322,11 @@ class ExportCommand(Command):
 
             # Write data in the selected format, using only the selected fields
             if args.format == "csv":
-                row_count = self._write_csv_format(file_path, rows, selected_fields)
+                row_count = self._write_csv_format(file_path, rows, selected_fields, args.encoding)
             elif args.format == "markdown":
-                row_count = self._write_markdown_format(file_path, rows, selected_fields)
+                row_count = self._write_markdown_format(file_path, rows, selected_fields, args.encoding)
             elif args.format == "flashcard":
-                row_count = self._write_flashcard_format(file_path, rows, selected_fields)
+                row_count = self._write_flashcard_format(file_path, rows, selected_fields, args.encoding)
 
             # Build detailed filter message for success output
             filter_parts = []
