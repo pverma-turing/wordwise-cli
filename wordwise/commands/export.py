@@ -6,7 +6,7 @@ import os
 import sqlite3
 import sys
 import csv
-from datetime import datetime
+from datetime import datetime as dt
 from pathlib import Path
 
 from .base import Command
@@ -41,8 +41,42 @@ class ExportCommand(Command):
             default="all",
             help="Filter words by learning status (all, learned, or to-review)"
         )
+        # New date range filter arguments
+        parser.add_argument(
+            "--from-date",
+            type=str,
+            help="Export words added on or after this date (YYYY-MM-DD)"
+        )
+
+        parser.add_argument(
+            "--to-date",
+            type=str,
+            help="Export words added on or before this date (YYYY-MM-DD)"
+        )
+
+    def _validate_date(self, date_str):
+        """Validate that a date string is in YYYY-MM-DD format."""
+        try:
+            dt.strptime(date_str, "%Y-%m-%d")
+            return True
+        except ValueError:
+            return False
 
     def execute(self, args):
+        # Validate date formats if provided
+        if args.from_date and not self._validate_date(args.from_date):
+            print(f"Error: Invalid date format for --from-date. Use YYYY-MM-DD.")
+            return
+
+        if args.to_date and not self._validate_date(args.to_date):
+            print(f"Error: Invalid date format for --to-date. Use YYYY-MM-DD.")
+            return
+
+        # Add date logical validation: from_date should be before to_date
+        if args.from_date and args.to_date and args.from_date > args.to_date:
+            print(f"Error: --from-date ({args.from_date}) must be on or before --to-date ({args.to_date}).")
+            return
+
         # Check if the target directory exists
         file_path = Path(args.file)
         directory = file_path.parent
@@ -58,28 +92,62 @@ class ExportCommand(Command):
                 print("Export cancelled.")
                 return
 
+        conn = None
         try:
             # Connect to the database
             conn = get_connection()
             cursor = conn.cursor()
 
-            # Build and execute query with optional status filtering
-            query = "SELECT word, note, status, date_added FROM words"
+            # Check if words table exists
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='words'")
+            if not cursor.fetchone():
+                print("No saved words database found.")
+                return
 
-            # Apply filtering directly at SQL query level for efficiency
+            # Build query with multiple potential conditions
+            query = "SELECT word, note, status, date_added FROM words"
+            conditions = []
+            params = []
+
+            # Add each filter condition if specified
             if args.status != "all":
-                query += " WHERE status = ?"
-                cursor.execute(query, (args.status,))
-            else:
-                cursor.execute(query)
+                conditions.append("status = ?")
+                params.append(args.status)
+
+            if args.from_date:
+                conditions.append("date_added >= ?")
+                params.append(args.from_date)
+
+            if args.to_date:
+                conditions.append("date_added <= ?")
+                params.append(args.to_date)
+
+            # Build complete query with all conditions
+            if conditions:
+                query += " WHERE " + " AND ".join(conditions)
+
+            # Execute the query with parameters
+            cursor.execute(query, params)
 
             # Fetch all results
             rows = cursor.fetchall()
 
             # If no rows found, inform user and exit
             if not rows:
-                status_msg = f" with status '{args.status}'" if args.status != "all" else ""
-                print(f"No words{status_msg} found to export.")
+                # Build a message about applied filters
+                filter_parts = []
+                if args.status != "all":
+                    filter_parts.append(f"status '{args.status}'")
+                if args.from_date:
+                    filter_parts.append(f"from {args.from_date}")
+                if args.to_date:
+                    filter_parts.append(f"to {args.to_date}")
+
+                filter_msg = ""
+                if filter_parts:
+                    filter_msg = f" with {' and '.join(filter_parts)}"
+
+                print(f"No words found{filter_msg} to export.")
                 return
 
             # Write data to CSV file
@@ -99,9 +167,20 @@ class ExportCommand(Command):
                     csv_writer.writerow([word, note, status, date_added])
                     row_count += 1
 
-            # Provide success message that indicates when filtering was applied
-            status_msg = f" with status '{args.status}'" if args.status != "all" else ""
-            print(f"Successfully exported {row_count} words{status_msg} to {args.file}")
+            # Build detailed filter message for success output
+            filter_parts = []
+            if args.status != "all":
+                filter_parts.append(f"status '{args.status}'")
+            if args.from_date:
+                filter_parts.append(f"from {args.from_date}")
+            if args.to_date:
+                filter_parts.append(f"to {args.to_date}")
+
+            filter_msg = ""
+            if filter_parts:
+                filter_msg = f" (filtered by: {', '.join(filter_parts)})"
+
+            print(f"Successfully exported {row_count} words{filter_msg} to {args.file}")
 
         except sqlite3.Error as e:
             print(f"Database error: {e}")
