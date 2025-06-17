@@ -61,6 +61,13 @@ class ExportCommand(Command):
             help="Export only words containing this text (case-insensitive)"
         )
 
+        parser.add_argument(
+            "--format",
+            choices=["csv", "markdown", "flashcard"],
+            default="csv",
+            help="Output format (csv, markdown, or flashcard)"
+        )
+
     def _validate_date(self, date_str):
         """Validate that a date string is in YYYY-MM-DD format."""
         try:
@@ -68,6 +75,43 @@ class ExportCommand(Command):
             return True
         except ValueError:
             return False
+
+    def _write_csv_format(self, file_path, rows):
+        """Write data in CSV format."""
+        with open(file_path, 'w', newline='', encoding='utf-8') as file:
+            writer = csv.writer(file)
+            writer.writerow(['Word', 'Note', 'Status', 'Date Added'])
+            for row in rows:
+                word, note, status, date_added = row
+                note = note if note is not None else ""
+                writer.writerow([word, note, status, date_added])
+        return len(rows)
+
+    def _write_markdown_format(self, file_path, rows):
+        """Write data in Markdown table format."""
+        with open(file_path, 'w', encoding='utf-8') as file:
+            # Write markdown table header
+            file.write("| Word | Note | Status | Date Added |\n")
+            file.write("|------|------|--------|------------|\n")
+            # Write data rows
+            for row in rows:
+                word, note, status, date_added = row
+                note = note if note is not None else ""
+                # Escape pipe characters in values for markdown table
+                word = word.replace("|", "\\|")
+                note = note.replace("|", "\\|")
+                status = status.replace("|", "\\|")
+                file.write(f"| {word} | {note} | {status} | {date_added} |\n")
+        return len(rows)
+
+    def _write_flashcard_format(self, file_path, rows):
+        """Write data in simple flashcard text format."""
+        with open(file_path, 'w', encoding='utf-8') as file:
+            for row in rows:
+                word, note, status, date_added = row
+                note = note if note is not None else ""
+                file.write(f"{word}: {note} [{status}]\n")
+        return len(rows)
 
     def execute(self, args):
         # Validate date formats if provided
@@ -116,7 +160,7 @@ class ExportCommand(Command):
             conditions = []
             params = []
 
-            # Add each filter condition if specified
+            # Apply all filters
             if args.status != "all":
                 conditions.append("status = ?")
                 params.append(args.status)
@@ -129,16 +173,15 @@ class ExportCommand(Command):
                 conditions.append("date_added <= ?")
                 params.append(args.to_date)
 
-            # Add text search condition
             if args.search:
                 conditions.append("LOWER(word) LIKE LOWER(?)")
                 params.append(f"%{args.search}%")
 
-            # Build complete query with all conditions
+            # Add WHERE clause if any conditions exist
             if conditions:
                 query += " WHERE " + " AND ".join(conditions)
 
-            # Execute the query with parameters
+            # Execute query with parameters
             cursor.execute(query, params)
 
             # Fetch all results
@@ -164,22 +207,13 @@ class ExportCommand(Command):
                 print(f"No words found{filter_msg} to export.")
                 return
 
-            # Write data to CSV file
-            with open(file_path, 'w', newline='', encoding='utf-8') as csv_file:
-                csv_writer = csv.writer(csv_file)
-
-                # Write header row
-                csv_writer.writerow(['Word', 'Note', 'Status', 'Date Added'])
-
-                # Write data rows
-                row_count = 0
-                for row in rows:
-                    word, note, status, date_added = row
-                    # Handle None values for note
-                    note = note if note is not None else ""
-
-                    csv_writer.writerow([word, note, status, date_added])
-                    row_count += 1
+            # Write data in the selected format
+            if args.format == "csv":
+                row_count = self._write_csv_format(file_path, rows)
+            elif args.format == "markdown":
+                row_count = self._write_markdown_format(file_path, rows)
+            elif args.format == "flashcard":
+                row_count = self._write_flashcard_format(file_path, rows)
 
             # Build detailed filter message for success output
             filter_parts = []
@@ -196,7 +230,8 @@ class ExportCommand(Command):
             if filter_parts:
                 filter_msg = f" (filtered by: {', '.join(filter_parts)})"
 
-            print(f"Successfully exported {row_count} words{filter_msg} to {args.file}")
+            # Include format in success message
+            print(f"Successfully exported {row_count} words{filter_msg} to {args.file} in {args.format.upper()} format")
 
         except sqlite3.Error as e:
             print(f"Database error: {e}")
