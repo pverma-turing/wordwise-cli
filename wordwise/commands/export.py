@@ -54,6 +54,13 @@ class ExportCommand(Command):
             help="Export words added on or before this date (YYYY-MM-DD)"
         )
 
+        # New text search argument
+        parser.add_argument(
+            "--search",
+            type=str,
+            help="Export only words containing this text (case-insensitive)"
+        )
+
     def _validate_date(self, date_str):
         """Validate that a date string is in YYYY-MM-DD format."""
         try:
@@ -81,12 +88,12 @@ class ExportCommand(Command):
         file_path = Path(args.file)
         directory = file_path.parent
 
-        if not directory.exists():
+        if not os.path.exists(directory):
             print(f"Error: Directory {directory} does not exist.")
             return
 
         # Check if file exists and confirm overwrite
-        if file_path.exists():
+        if os.path.exists(file_path):
             confirmation = input(f"File {args.file} already exists. Overwrite? (y/n): ")
             if confirmation.lower() not in ["y", "yes"]:
                 print("Export cancelled.")
@@ -122,6 +129,11 @@ class ExportCommand(Command):
                 conditions.append("date_added <= ?")
                 params.append(args.to_date)
 
+            # Add text search condition
+            if args.search:
+                conditions.append("LOWER(word) LIKE LOWER(?)")
+                params.append(f"%{args.search}%")
+
             # Build complete query with all conditions
             if conditions:
                 query += " WHERE " + " AND ".join(conditions)
@@ -142,6 +154,8 @@ class ExportCommand(Command):
                     filter_parts.append(f"from {args.from_date}")
                 if args.to_date:
                     filter_parts.append(f"to {args.to_date}")
+                if args.search:
+                    filter_parts.append(f"containing '{args.search}'")
 
                 filter_msg = ""
                 if filter_parts:
@@ -175,6 +189,8 @@ class ExportCommand(Command):
                 filter_parts.append(f"from {args.from_date}")
             if args.to_date:
                 filter_parts.append(f"to {args.to_date}")
+            if args.search:
+                filter_parts.append(f"containing '{args.search}'")
 
             filter_msg = ""
             if filter_parts:
