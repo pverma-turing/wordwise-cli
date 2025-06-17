@@ -9,3 +9,4 @@ from wordwise.commands.edit import EditCommand
 from wordwise.commands.export import ExportCommand
 from wordwise.commands.review import ReviewCommand
 from wordwise.commands.delete import DeleteCommand
+from wordwise.commands.set_goal import SetGoalCommand
