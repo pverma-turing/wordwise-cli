@@ -10,6 +10,166 @@ from wordwise.data.database import get_connection
 
 @register_command
 class RemindCommand(Command):
+    # Language dictionaries for translations
+    TRANSLATIONS = {
+        "en": {
+            # Positive messages
+            "positive_default": [
+                "Great job! You've already practiced today.",
+                "Excellent work on your language learning today!",
+                "Keep up the good work! Your consistency is paying off.",
+                "Your dedication to learning is impressive!",
+                "You're on a roll! Your language skills are growing every day."
+            ],
+            "positive_morning": [
+                "Great start to your day with some language practice!",
+                "Morning practice sets a positive tone for the day!",
+                "Starting your day with learning shows great dedication!",
+                "Morning review sessions are a fantastic habit!",
+                "Your morning language practice is setting you up for success today."
+            ],
+            "positive_evening": [
+                "Excellent job fitting in language practice before the day ends!",
+                "Winding down your day with some learning - perfect!",
+                "Evening practice sessions are great for memory consolidation!",
+                "Great way to conclude your day with some language learning!",
+                "Your evening dedication to learning is impressive!"
+            ],
+            # Reminder messages
+            "reminder_default": [
+                "You haven't practiced today — take 5 minutes now to review your words!",
+                "A quick review session will help strengthen your memory. How about now?",
+                "Learning a little each day adds up! Take a moment to practice today.",
+                "Make progress on your language journey with just 5 minutes of practice today.",
+                "Consistency is key to language learning! Don't break your streak today."
+            ],
+            "reminder_morning": [
+                "Start your day with a quick review!",
+                "Morning is the perfect time to learn something new!",
+                "Kickstart your brain with some language practice this morning.",
+                "Begin your day with 5 minutes of vocabulary practice.",
+                "Morning vocabulary practice sets a positive tone for the day ahead."
+            ],
+            "reminder_evening": [
+                "Wind down your day by practicing your words.",
+                "Before the day ends, take a moment for language learning.",
+                "Evening is a great time to reinforce your vocabulary skills.",
+                "End your day on a productive note with a quick word review.",
+                "Round off your day with a few minutes of language practice."
+            ],
+            # Streak messages
+            "streak_risk": [
+                "Your {streak_length}-day learning streak is at risk! Take a moment to practice today.",
+                "Don't break your {streak_length}-day streak! A quick review session will keep it going.",
+                "Protect your {streak_length}-day learning streak with a quick practice session.",
+                "Just 5 minutes of practice will maintain your {streak_length}-day streak.",
+                "Keep your momentum going! Your {streak_length}-day streak needs attention today."
+            ],
+            # Activity messages
+            "activity_added_reviewed": "Today you've added {words_added} new word(s) and completed {reviews_done} review(s).",
+            "activity_added": "Today you've added {words_added} new word(s) to your collection.",
+            "activity_reviewed": "Today you've reviewed {reviews_done} word(s) in your collection.",
+            # Goal messages
+            "goal_achieved": "\n🎯 Daily goal achieved! {words_added} of {daily_goal} words saved today ({percentage}%).",
+            "goal_progress": "\n🎯 Daily goal: {words_added} of {daily_goal} words saved today ({percentage}%).",
+            # Suggestion messages
+            "suggestion_morning": "\nConsider scheduling another review session later today to reinforce your learning!",
+            "suggestion_evening": "\nGreat job completing your practice today. Plan tomorrow's learning session for continued progress!",
+            "suggestion_default": "\nConsider doing more reviews or adding new words to enhance your learning!",
+            # Streak suggestions
+            "streak_suggestion_morning": "\nIt only takes a few minutes to maintain your streak.\nUse 'wordwise review' to get your day off to a productive start and keep your streak alive.",
+            "streak_suggestion_evening": "\nThere's still time to maintain your progress before the day ends!\nTry 'wordwise review' for a quick session to preserve your streak.",
+            "streak_suggestion_default": "\nMaintaining consistency is key to effective learning.\nUse 'wordwise review' or 'wordwise lookup <word>' to keep your streak going.",
+            # Reminder suggestions
+            "reminder_suggestion_morning": "\nStarting with a review session improves retention throughout the day.\nUse 'wordwise review' to get your day off to a productive start.",
+            "reminder_suggestion_evening": "\nEvening review helps consolidate what you've learned during the day.\nTry 'wordwise review' for a relaxing but productive end to your day.",
+            "reminder_suggestion_default": "\nUse 'wordwise review' to practice your saved words.\nOr try 'wordwise lookup <word>' to explore and save new words.",
+            # Other text
+            "forced_reminder_suffix": "(Forced reminder)",
+            "gentle_no_reminder": "No reminder needed - you're doing fine!",
+            "startup_enabled": "Automatic startup reminders enabled.",
+            "startup_disabled": "Automatic startup reminders disabled."
+        },
+        "de": {
+            # Positive messages (German)
+            "positive_default": [
+                "Gute Arbeit! Du hast heute bereits geübt.",
+                "Ausgezeichnete Arbeit beim Sprachenlernen heute!",
+                "Weiter so! Deine Konsequenz zahlt sich aus.",
+                "Dein Engagement für das Lernen ist beeindruckend!",
+                "Du bist auf einem guten Weg! Deine Sprachkenntnisse wachsen täglich."
+            ],
+            "positive_morning": [
+                "Ein guter Start in den Tag mit etwas Sprachpraxis!",
+                "Morgenübungen stimmen dich positiv für den Tag!",
+                "Der Beginn deines Tages mit Lernen zeigt große Hingabe!",
+                "Morgendliche Übungssitzungen sind eine fantastische Gewohnheit!",
+                "Deine morgendliche Sprachpraxis bereitet dich auf einen erfolgreichen Tag vor."
+            ],
+            "positive_evening": [
+                "Hervorragend, dass du vor Tagesende noch Sprachübungen eingebaut hast!",
+                "Den Tag mit etwas Lernen ausklingen lassen - perfekt!",
+                "Abendliche Übungssitzungen sind großartig für die Gedächtniskonsolidierung!",
+                "Ein toller Abschluss deines Tages mit etwas Sprachenlernen!",
+                "Dein abendliches Engagement für das Lernen ist beeindruckend!"
+            ],
+            # Reminder messages (German)
+            "reminder_default": [
+                "Du hast heute noch nicht geübt — nimm dir jetzt 5 Minuten Zeit für deine Wörter!",
+                "Eine schnelle Übungssession hilft deinem Gedächtnis. Wie wäre es jetzt?",
+                "Jeden Tag ein bisschen lernen summiert sich! Nimm dir heute einen Moment Zeit zum Üben.",
+                "Mach Fortschritte auf deiner Sprachlernreise mit nur 5 Minuten Übung heute.",
+                "Konsequenz ist der Schlüssel zum Sprachenlernen! Brich deine Serie heute nicht ab."
+            ],
+            "reminder_morning": [
+                "Beginne deinen Tag mit einer schnellen Wiederholung!",
+                "Der Morgen ist die perfekte Zeit, um etwas Neues zu lernen!",
+                "Starte dein Gehirn mit etwas Sprachpraxis heute Morgen.",
+                "Beginne deinen Tag mit 5 Minuten Vokabelübung.",
+                "Morgendliche Vokabelübungen stimmen dich positiv für den bevorstehenden Tag."
+            ],
+            "reminder_evening": [
+                "Lass deinen Tag mit etwas Wortübung ausklingen.",
+                "Bevor der Tag endet, nimm dir einen Moment für das Sprachenlernen.",
+                "Der Abend ist eine großartige Zeit, um deine Vokabelkenntnisse zu festigen.",
+                "Beende deinen Tag mit einer schnellen Wortwiederholung.",
+                "Runde deinen Tag mit ein paar Minuten Sprachpraxis ab."
+            ],
+            # Streak messages (German)
+            "streak_risk": [
+                "Deine {streak_length}-tägige Lernserie ist in Gefahr! Nimm dir einen Moment zum Üben.",
+                "Brich deine {streak_length}-tägige Serie nicht! Eine kurze Übungssitzung hält sie aufrecht.",
+                "Schütze deine {streak_length}-tägige Lernserie mit einer schnellen Übungssitzung.",
+                "Nur 5 Minuten Übung erhalten deine {streak_length}-tägige Serie.",
+                "Halte den Schwung aufrecht! Deine {streak_length}-tägige Serie braucht heute Aufmerksamkeit."
+            ],
+            # Activity messages (German)
+            "activity_added_reviewed": "Heute hast du {words_added} neue Wörter hinzugefügt und {reviews_done} Wiederholungen abgeschlossen.",
+            "activity_added": "Heute hast du {words_added} neue Wörter zu deiner Sammlung hinzugefügt.",
+            "activity_reviewed": "Heute hast du {reviews_done} Wörter in deiner Sammlung wiederholt.",
+            # Goal messages (German)
+            "goal_achieved": "\n🎯 Tagesziel erreicht! {words_added} von {daily_goal} Wörtern heute gespeichert ({percentage}%).",
+            "goal_progress": "\n🎯 Tagesziel: {words_added} von {daily_goal} Wörtern heute gespeichert ({percentage}%).",
+            # Suggestion messages (German)
+            "suggestion_morning": "\nÜberlege dir, später heute eine weitere Übungssitzung einzuplanen, um dein Lernen zu verstärken!",
+            "suggestion_evening": "\nTolle Arbeit beim Üben heute. Plane deine morgige Lernsitzung für kontinuierlichen Fortschritt!",
+            "suggestion_default": "\nDenk darüber nach, weitere Wiederholungen zu machen oder neue Wörter hinzuzufügen, um dein Lernen zu verbessern!",
+            # Streak suggestions (German)
+            "streak_suggestion_morning": "\nEs dauert nur wenige Minuten, um deine Serie aufrechtzuerhalten.\nVerwende 'wordwise review', um deinen Tag produktiv zu beginnen und deine Serie am Leben zu erhalten.",
+            "streak_suggestion_evening": "\nEs ist noch Zeit, deinen Fortschritt aufrechtzuerhalten, bevor der Tag endet!\nProbiere 'wordwise review' für eine schnelle Sitzung, um deine Serie zu erhalten.",
+            "streak_suggestion_default": "\nKonsequenz ist der Schlüssel zum effektiven Lernen.\nVerwende 'wordwise review' oder 'wordwise lookup <word>', um deine Serie fortzusetzen.",
+            # Reminder suggestions (German)
+            "reminder_suggestion_morning": "\nEine Übungssitzung am Morgen verbessert die Merkfähigkeit den ganzen Tag über.\nVerwende 'wordwise review', um deinen Tag produktiv zu beginnen.",
+            "reminder_suggestion_evening": "\nAbendliche Wiederholung hilft, das tagsüber Gelernte zu festigen.\nProbiere 'wordwise review' für einen entspannten, aber produktiven Tagesabschluss.",
+            "reminder_suggestion_default": "\nVerwende 'wordwise review', um deine gespeicherten Wörter zu üben.\nOder probiere 'wordwise lookup <word>', um neue Wörter zu entdecken und zu speichern.",
+            # Other text (German)
+            "forced_reminder_suffix": "(Erzwungene Erinnerung)",
+            "gentle_no_reminder": "Keine Erinnerung nötig - alles in Ordnung!",
+            "startup_enabled": "Automatische Starterinnerungen aktiviert.",
+            "startup_disabled": "Automatische Starterinnerungen deaktiviert."
+        }
+    }
+
     @property
     def name(self):
         return "remind"
@@ -49,9 +209,18 @@ class RemindCommand(Command):
             action="store_true",
             help="Always show a reminder regardless of practice status or gentle mode setting"
         )
+        # Add language selection argument
+        parser.add_argument(
+            "--lang",
+            choices=["en", "de"],
+            default="en",
+            help="Language for reminder messages (en=English, de=German)"
+        )
 
     def execute(self, args):
-        # Get the DB path - using the same approach as other commands
+        # Set the language to use
+        self.lang = args.lang
+
         conn = None
         try:
             conn = get_connection()
@@ -61,8 +230,8 @@ class RemindCommand(Command):
             if hasattr(args, 'startup') and args.startup:
                 self._configure_startup_reminder(cursor, args.startup == "enable")
                 conn.commit()
-                state = "enabled" if args.startup == "enable" else "disabled"
-                print(f"Automatic startup reminders {state}.")
+                state = self._get_text("startup_enabled" if args.startup == "enable" else "startup_disabled")
+                print(state)
                 return
 
             # Ensure the reminder_history table exists
@@ -123,7 +292,7 @@ class RemindCommand(Command):
             if args.gentle and not args.force and (has_activity_today or streak_length <= 1):
                 # In gentle mode, don't show anything if user has already practiced
                 # or if their streak is 0 or 1 day (not at risk)
-                print("No reminder needed - you're doing fine!")
+                print(self._get_text("gentle_no_reminder"))
                 return
 
             # Generate and display the appropriate message, and log it
@@ -181,6 +350,28 @@ class RemindCommand(Command):
         finally:
             if conn:
                 conn.close()
+
+    def _get_text(self, key, **kwargs):
+        """Get translated text from the language dictionary with placeholders filled."""
+        if key not in self.TRANSLATIONS[self.lang]:
+            # Fall back to English if the key doesn't exist in the selected language
+            value = self.TRANSLATIONS["en"].get(key, f"Missing text key: {key}")
+        else:
+            value = self.TRANSLATIONS[self.lang][key]
+
+        # If the value is a list, pick a random item
+        if isinstance(value, list):
+            value = random.choice(value)
+
+        # Fill in any placeholders
+        if kwargs:
+            try:
+                value = value.format(**kwargs)
+            except KeyError:
+                # Just return the original string if placeholders don't match
+                pass
+
+        return value
 
     def _get_current_streak(self, cursor):
         """Calculate the current learning streak from activity records."""
@@ -366,9 +557,11 @@ class RemindCommand(Command):
         percentage = min(100, int((words_added_today / daily_goal) * 100))
 
         if words_added_today >= daily_goal:
-            return f"\n🎯 Daily goal achieved! {words_added_today} of {daily_goal} words saved today ({percentage}%)."
+            return self._get_text("goal_achieved", words_added=words_added_today,
+                                  daily_goal=daily_goal, percentage=percentage)
         else:
-            return f"\n🎯 Daily goal: {words_added_today} of {daily_goal} words saved today ({percentage}%)."
+            return self._get_text("goal_progress", words_added=words_added_today,
+                                  daily_goal=daily_goal, percentage=percentage)
 
     def _show_streak_at_risk_message(self, streak_length, time_of_day=None, daily_goal=None, custom_message=None):
         """Display a reminder focusing on the streak being at risk."""
@@ -376,17 +569,8 @@ class RemindCommand(Command):
         if custom_message:
             main_message = f"✨ {custom_message}"
         else:
-            # Special streak-focused messages
-            streak_messages = [
-                f"⚠️ Your {streak_length}-day learning streak is at risk! Take a moment to practice today.",
-                f"⚠️ Don't break your {streak_length}-day streak! A quick review session will keep it going.",
-                f"⚠️ Protect your {streak_length}-day learning streak with a quick practice session.",
-                f"⚠️ Just 5 minutes of practice will maintain your {streak_length}-day streak.",
-                f"⚠️ Keep your momentum going! Your {streak_length}-day streak needs attention today."
-            ]
-
-            # Choose a random streak message
-            main_message = random.choice(streak_messages)
+            # Get the streak message with the streak length formatted in
+            main_message = "⚠️ " + self._get_text("streak_risk", streak_length=streak_length)
 
         # Print the main message
         print(f"\n{main_message}")
@@ -401,18 +585,14 @@ class RemindCommand(Command):
             full_message += goal_message
 
         # Add contextual suggestions based on time of day
-        suggestion_message = ""
         if time_of_day == "morning":
-            suggestion_message = "\nIt only takes a few minutes to maintain your streak."
-            suggestion_message += "\nUse 'wordwise review' to get your day off to a productive start and keep your streak alive.\n"
+            suggestion_message = self._get_text("streak_suggestion_morning")
         elif time_of_day == "evening":
-            suggestion_message = "\nThere's still time to maintain your progress before the day ends!"
-            suggestion_message += "\nTry 'wordwise review' for a quick session to preserve your streak.\n"
+            suggestion_message = self._get_text("streak_suggestion_evening")
         else:
-            suggestion_message = "\nMaintaining consistency is key to effective learning."
-            suggestion_message += "\nUse 'wordwise review' or 'wordwise lookup <word>' to keep your streak going.\n"
+            suggestion_message = self._get_text("streak_suggestion_default")
 
-        print(f"{suggestion_message}")
+        print(f"{suggestion_message}\n")
         full_message += f"{suggestion_message}"
 
         return full_message
@@ -424,38 +604,21 @@ class RemindCommand(Command):
         if custom_message:
             main_message = f"✨ {custom_message}"
         else:
+            # Select the appropriate message category based on time of day
             if time_of_day == "morning":
-                positive_messages = [
-                    "Great start to your day with some language practice!",
-                    "Morning practice sets a positive tone for the day!",
-                    "Starting your day with learning shows great dedication!",
-                    "Morning review sessions are a fantastic habit!",
-                    "Your morning language practice is setting you up for success today."
-                ]
+                message_type = "positive_morning"
             elif time_of_day == "evening":
-                positive_messages = [
-                    "Excellent job fitting in language practice before the day ends!",
-                    "Winding down your day with some learning - perfect!",
-                    "Evening practice sessions are great for memory consolidation!",
-                    "Great way to conclude your day with some language learning!",
-                    "Your evening dedication to learning is impressive!"
-                ]
+                message_type = "positive_evening"
             else:
-                # Default positive messages (no time specified)
-                positive_messages = [
-                    "Great job! You've already practiced today.",
-                    "Excellent work on your language learning today!",
-                    "Keep up the good work! Your consistency is paying off.",
-                    "Your dedication to learning is impressive!",
-                    "You're on a roll! Your language skills are growing every day."
-                ]
+                message_type = "positive_default"
 
-            # Choose a random positive message
-            message = random.choice(positive_messages)
+            # Get a random message from the appropriate category
+            message = self._get_text(message_type)
 
             # Add forced indicator if applicable
             if forced:
-                main_message = f"🔔 {message} (Forced reminder)"
+                forced_suffix = self._get_text("forced_reminder_suffix")
+                main_message = f"🔔 {message} {forced_suffix}"
             else:
                 main_message = f"🎉 {message}"
 
@@ -468,11 +631,12 @@ class RemindCommand(Command):
         # Add activity details
         activity_message = ""
         if words_added > 0 and reviews_done > 0:
-            activity_message = f"Today you've added {words_added} new word(s) and completed {reviews_done} review(s)."
+            activity_message = self._get_text("activity_added_reviewed",
+                                              words_added=words_added, reviews_done=reviews_done)
         elif words_added > 0:
-            activity_message = f"Today you've added {words_added} new word(s) to your collection."
+            activity_message = self._get_text("activity_added", words_added=words_added)
         elif reviews_done > 0:
-            activity_message = f"Today you've reviewed {reviews_done} word(s) in your collection."
+            activity_message = self._get_text("activity_reviewed", reviews_done=reviews_done)
 
         if activity_message:
             print(activity_message)
@@ -485,13 +649,12 @@ class RemindCommand(Command):
             full_message += goal_message
 
         # Add a suggestion based on time of day
-        suggestion_message = ""
         if time_of_day == "morning":
-            suggestion_message = "\nConsider scheduling another review session later today to reinforce your learning!"
+            suggestion_message = self._get_text("suggestion_morning")
         elif time_of_day == "evening":
-            suggestion_message = "\nGreat job completing your practice today. Plan tomorrow's learning session for continued progress!"
+            suggestion_message = self._get_text("suggestion_evening")
         else:
-            suggestion_message = "\nConsider doing more reviews or adding new words to enhance your learning!"
+            suggestion_message = self._get_text("suggestion_default")
 
         print(f"{suggestion_message}\n")
         full_message += f"{suggestion_message}"
@@ -504,38 +667,21 @@ class RemindCommand(Command):
         if custom_message:
             main_message = f"✨ {custom_message}"
         else:
+            # Select the appropriate message category based on time of day
             if time_of_day == "morning":
-                reminder_messages = [
-                    "Start your day with a quick review!",
-                    "Morning is the perfect time to learn something new!",
-                    "Kickstart your brain with some language practice this morning.",
-                    "Begin your day with 5 minutes of vocabulary practice.",
-                    "Morning vocabulary practice sets a positive tone for the day ahead."
-                ]
+                message_type = "reminder_morning"
             elif time_of_day == "evening":
-                reminder_messages = [
-                    "Wind down your day by practicing your words.",
-                    "Before the day ends, take a moment for language learning.",
-                    "Evening is a great time to reinforce your vocabulary skills.",
-                    "End your day on a productive note with a quick word review.",
-                    "Round off your day with a few minutes of language practice."
-                ]
+                message_type = "reminder_evening"
             else:
-                # Default reminder messages (no time specified)
-                reminder_messages = [
-                    "You haven't practiced today — take 5 minutes now to review your words!",
-                    "A quick review session will help strengthen your memory. How about now?",
-                    "Learning a little each day adds up! Take a moment to practice today.",
-                    "Make progress on your language journey with just 5 minutes of practice today.",
-                    "Consistency is key to language learning! Don't break your streak today."
-                ]
+                message_type = "reminder_default"
 
-            # Choose a random reminder message
-            message = random.choice(reminder_messages)
+            # Get a random message from the appropriate category
+            message = self._get_text(message_type)
 
             # Add forced indicator if applicable
             if forced:
-                main_message = f"🔔 {message} (Forced reminder)"
+                forced_suffix = self._get_text("forced_reminder_suffix")
+                main_message = f"🔔 {message} {forced_suffix}"
             else:
                 main_message = f"⏰ {message}"
 
@@ -552,16 +698,12 @@ class RemindCommand(Command):
             full_message += goal_message
 
         # Add contextual suggestions based on time of day
-        suggestion_message = ""
         if time_of_day == "morning":
-            suggestion_message = "\nStarting with a review session improves retention throughout the day."
-            suggestion_message += "\nUse 'wordwise review' to get your day off to a productive start."
+            suggestion_message = self._get_text("reminder_suggestion_morning")
         elif time_of_day == "evening":
-            suggestion_message = "\nEvening review helps consolidate what you've learned during the day."
-            suggestion_message += "\nTry 'wordwise review' for a relaxing but productive end to your day."
+            suggestion_message = self._get_text("reminder_suggestion_evening")
         else:
-            suggestion_message = "\nUse 'wordwise review' to practice your saved words."
-            suggestion_message += "\nOr try 'wordwise lookup <word>' to explore and save new words."
+            suggestion_message = self._get_text("reminder_suggestion_default")
 
         print(f"{suggestion_message}\n")
         full_message += f"{suggestion_message}"
