@@ -10,7 +10,7 @@ from wordwise.data.database import get_connection
 
 @register_command
 class RemindCommand(Command):
-    # Language dictionaries for translations
+    # Translation system for internationalization
     TRANSLATIONS = {
         "en": {
             # Positive messages
@@ -88,7 +88,10 @@ class RemindCommand(Command):
             "forced_reminder_suffix": "(Forced reminder)",
             "gentle_no_reminder": "No reminder needed - you're doing fine!",
             "startup_enabled": "Automatic startup reminders enabled.",
-            "startup_disabled": "Automatic startup reminders disabled."
+            "startup_disabled": "Automatic startup reminders disabled.",
+            # Error messages
+            "db_error": "Database error: {error}",
+            "unexpected_error": "An unexpected error occurred: {error}"
         },
         "de": {
             # Positive messages (German)
@@ -166,8 +169,20 @@ class RemindCommand(Command):
             "forced_reminder_suffix": "(Erzwungene Erinnerung)",
             "gentle_no_reminder": "Keine Erinnerung nötig - alles in Ordnung!",
             "startup_enabled": "Automatische Starterinnerungen aktiviert.",
-            "startup_disabled": "Automatische Starterinnerungen deaktiviert."
+            "startup_disabled": "Automatische Starterinnerungen deaktiviert.",
+            # Error messages (German)
+            "db_error": "Datenbankfehler: {error}",
+            "unexpected_error": "Ein unerwarteter Fehler ist aufgetreten: {error}"
         }
+    }
+
+    # Message icons for visual distinction
+    ICONS = {
+        "positive": "🎉",
+        "reminder": "⏰",
+        "streak_risk": "⚠️",
+        "forced": "🔔",
+        "custom": "✨"
     }
 
     @property
@@ -212,13 +227,13 @@ class RemindCommand(Command):
         # Add language selection argument
         parser.add_argument(
             "--lang",
-            choices=["en", "de"],
+            choices=list(self.TRANSLATIONS.keys()),
             default="en",
             help="Language for reminder messages (en=English, de=German)"
         )
 
     def execute(self, args):
-        # Set the language to use
+        # Set the language to use throughout this execution
         self.lang = args.lang
 
         conn = None
@@ -234,144 +249,167 @@ class RemindCommand(Command):
                 print(state)
                 return
 
-            # Ensure the reminder_history table exists
-            self._ensure_reminder_history_table(cursor)
-            # Ensure the settings table exists
-            self._ensure_settings_table(cursor)
+            # Ensure database tables exist
+            self._ensure_database_tables(cursor)
 
-            # Get today's date in ISO format for comparison
-            today = datetime.datetime.now().date().isoformat()
-
-            # Query 1: Check if any words were added today
-            cursor.execute(
-                "SELECT COUNT(*) FROM words WHERE date_added LIKE ?",
-                (f"{today}%",)
-            )
-            words_added_today = cursor.fetchone()[0]
-
-            # Query 2: Check if any words were reviewed today
-            has_review_table = False
-            cursor.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name='review_sessions'"
-            )
-            if cursor.fetchone():
-                has_review_table = True
-                cursor.execute(
-                    "SELECT COUNT(*) FROM review_sessions WHERE session_date LIKE ?",
-                    (f"{today}%",)
-                )
-                reviews_today = cursor.fetchone()[0]
-            else:
-                # If review_sessions table doesn't exist yet, check last_review_date in words table
-                cursor.execute(
-                    "SELECT COUNT(*) FROM pragma_table_info('words') WHERE name='last_review_date'"
-                )
-                has_review_date = cursor.fetchone()[0] > 0
-
-                if has_review_date:
-                    cursor.execute(
-                        "SELECT COUNT(*) FROM words WHERE last_review_date LIKE ?",
-                        (f"{today}%",)
-                    )
-                    reviews_today = cursor.fetchone()[0]
-                else:
-                    reviews_today = 0
-
-            # Query 3: Get the user's daily word goal if set
-            daily_goal = self._get_daily_word_goal(cursor)
-
-            # Query 4: Get the current streak information (if gentle mode is enabled)
-            streak_length = 0
-            if args.gentle and not args.force:  # Only calculate streak if needed
-                streak_length = self._get_current_streak(cursor)
-
-            # Determine user activity status for today
-            has_activity_today = words_added_today > 0 or reviews_today > 0
+            # Gather user activity data
+            activity_data = self._get_user_activity(cursor)
 
             # Check if we should show a reminder in gentle mode
-            if args.gentle and not args.force and (has_activity_today or streak_length <= 1):
-                # In gentle mode, don't show anything if user has already practiced
-                # or if their streak is 0 or 1 day (not at risk)
-                print(self._get_text("gentle_no_reminder"))
-                return
+            if args.gentle and not args.force:
+                if activity_data['has_activity_today'] or activity_data['streak_length'] <= 1:
+                    print(self._get_text("gentle_no_reminder"))
+                    return
 
-            # Generate and display the appropriate message, and log it
-            # Note: with --force, we'll show a message regardless of activity status
+            # Display appropriate message based on activity and flags
+            message = self._display_appropriate_message(activity_data, args)
 
-            if has_activity_today and not args.force:
-                # Normal positive message for active users (unless forced)
-                message = self._show_positive_message(
-                    words_added_today, reviews_done=reviews_today,
-                    time_of_day=args.time, daily_goal=daily_goal,
-                    custom_message=args.custom_message
-                )
-                self._log_reminder(cursor, "positive", message)
-            else:
-                # If in gentle mode and streak > 1, or if force flag is used
-                if (args.gentle and streak_length > 1) or args.force:
-                    # Choose appropriate message type based on context
-                    if args.force and has_activity_today:
-                        # Force flag with activity - show positive but mark as forced
-                        message = self._show_positive_message(
-                            words_added_today, reviews_done=reviews_today,
-                            time_of_day=args.time, daily_goal=daily_goal,
-                            custom_message=args.custom_message, forced=True
-                        )
-                        self._log_reminder(cursor, "forced_positive", message)
-                    elif args.force:
-                        # Force flag without activity - show reminder but mark as forced
-                        message = self._show_reminder_message(
-                            time_of_day=args.time, daily_goal=daily_goal,
-                            custom_message=args.custom_message, forced=True
-                        )
-                        self._log_reminder(cursor, "forced_reminder", message)
-                    elif args.gentle:
-                        # Gentle mode with streak at risk
-                        message = self._show_streak_at_risk_message(
-                            streak_length, time_of_day=args.time,
-                            daily_goal=daily_goal, custom_message=args.custom_message
-                        )
-                        self._log_reminder(cursor, "streak_risk", message)
-                else:
-                    # Standard reminder message
-                    message = self._show_reminder_message(
-                        time_of_day=args.time, daily_goal=daily_goal,
-                        custom_message=args.custom_message
-                    )
-                    self._log_reminder(cursor, "reminder", message)
-
-            # Commit the transaction to save the reminder log
-            conn.commit()
+            # Log the reminder to the database
+            if message:
+                self._log_reminder(cursor, message['type'], message['text'])
+                conn.commit()
 
         except sqlite3.Error as e:
-            print(f"Database error: {e}")
+            print(self._get_text("db_error", error=str(e)))
         except Exception as e:
-            print(f"An unexpected error occurred: {e}")
+            print(self._get_text("unexpected_error", error=str(e)))
         finally:
             if conn:
                 conn.close()
 
-    def _get_text(self, key, **kwargs):
-        """Get translated text from the language dictionary with placeholders filled."""
-        if key not in self.TRANSLATIONS[self.lang]:
-            # Fall back to English if the key doesn't exist in the selected language
-            value = self.TRANSLATIONS["en"].get(key, f"Missing text key: {key}")
+    def _ensure_database_tables(self, cursor):
+        """Ensure all required database tables exist."""
+        self._ensure_reminder_history_table(cursor)
+        self._ensure_settings_table(cursor)
+
+    def _get_user_activity(self, cursor):
+        """
+        Gather and return user activity data.
+
+        Returns:
+            dict: A dict containing activity information
+        """
+        # Get today's date in ISO format for comparison
+        today = datetime.datetime.now().date().isoformat()
+
+        # Initialize the activity data structure
+        activity_data = {
+            'today': today,
+            'words_added_today': 0,
+            'reviews_today': 0,
+            'has_activity_today': False,
+            'streak_length': 0,
+            'daily_goal': None
+        }
+
+        # Check if any words were added today
+        cursor.execute(
+            "SELECT COUNT(*) FROM words WHERE date_added LIKE ?",
+            (f"{today}%",)
+        )
+        activity_data['words_added_today'] = cursor.fetchone()[0]
+
+        # Check for reviews today (from different possible sources)
+        activity_data['reviews_today'] = self._count_reviews_today(cursor, today)
+
+        # Get the user's daily word goal if set
+        activity_data['daily_goal'] = self._get_daily_word_goal(cursor)
+
+        # Calculate streak length
+        activity_data['streak_length'] = self._get_current_streak(cursor)
+
+        # Determine overall activity status
+        activity_data['has_activity_today'] = (activity_data['words_added_today'] > 0 or
+                                               activity_data['reviews_today'] > 0)
+
+        return activity_data
+
+    def _count_reviews_today(self, cursor, today):
+        """Count how many reviews were done today from various possible sources."""
+        # First check if review_sessions table exists
+        cursor.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='review_sessions'"
+        )
+        if cursor.fetchone():
+            cursor.execute(
+                "SELECT COUNT(*) FROM review_sessions WHERE session_date LIKE ?",
+                (f"{today}%",)
+            )
+            return cursor.fetchone()[0]
+
+        # If not, check if last_review_date column exists in words table
+        cursor.execute(
+            "SELECT COUNT(*) FROM pragma_table_info('words') WHERE name='last_review_date'"
+        )
+        if cursor.fetchone()[0] > 0:
+            cursor.execute(
+                "SELECT COUNT(*) FROM words WHERE last_review_date LIKE ?",
+                (f"{today}%",)
+            )
+            return cursor.fetchone()[0]
+
+        # If neither exists, no reviews have been done
+        return 0
+
+    def _display_appropriate_message(self, activity_data, args):
+        """
+        Determine and display the appropriate message based on activity and flags.
+
+        Returns:
+            dict: Message info with 'type' and 'text' keys, or None if no message
+        """
+        # Determine message type and parameters based on conditions
+        if activity_data['has_activity_today'] and not args.force:
+            # Positive message for users who have practiced
+            message_text = self._show_positive_message(
+                activity_data['words_added_today'],
+                activity_data['reviews_today'],
+                args.time,
+                activity_data['daily_goal'],
+                args.custom_message
+            )
+            return {'type': 'positive', 'text': message_text}
+
+        elif args.force and activity_data['has_activity_today']:
+            # Forced positive message
+            message_text = self._show_positive_message(
+                activity_data['words_added_today'],
+                activity_data['reviews_today'],
+                args.time,
+                activity_data['daily_goal'],
+                args.custom_message,
+                forced=True
+            )
+            return {'type': 'forced_positive', 'text': message_text}
+
+        elif args.force:
+            # Forced reminder message
+            message_text = self._show_reminder_message(
+                args.time,
+                activity_data['daily_goal'],
+                args.custom_message,
+                forced=True
+            )
+            return {'type': 'forced_reminder', 'text': message_text}
+
+        elif args.gentle and activity_data['streak_length'] > 1:
+            # Streak at risk message (gentle mode)
+            message_text = self._show_streak_at_risk_message(
+                activity_data['streak_length'],
+                args.time,
+                activity_data['daily_goal'],
+                args.custom_message
+            )
+            return {'type': 'streak_risk', 'text': message_text}
+
         else:
-            value = self.TRANSLATIONS[self.lang][key]
-
-        # If the value is a list, pick a random item
-        if isinstance(value, list):
-            value = random.choice(value)
-
-        # Fill in any placeholders
-        if kwargs:
-            try:
-                value = value.format(**kwargs)
-            except KeyError:
-                # Just return the original string if placeholders don't match
-                pass
-
-        return value
+            # Standard reminder message
+            message_text = self._show_reminder_message(
+                args.time,
+                activity_data['daily_goal'],
+                args.custom_message
+            )
+            return {'type': 'reminder', 'text': message_text}
 
     def _get_current_streak(self, cursor):
         """Calculate the current learning streak from activity records."""
@@ -383,44 +421,12 @@ class RemindCommand(Command):
             # Start checking from yesterday (since today is checked separately)
             check_date = current_date - datetime.timedelta(days=1)
 
-            # We'll check up to 1000 days back to avoid infinite loops
-            # This is just a safety measure - practical streaks won't be this long
+            # Check for streak (limit to 1000 days for safety)
             for _ in range(1000):
                 date_str = check_date.isoformat()
-                has_activity = False
 
-                # Check for word additions on this date
-                cursor.execute(
-                    "SELECT COUNT(*) FROM words WHERE date_added LIKE ?",
-                    (f"{date_str}%",)
-                )
-                if cursor.fetchone()[0] > 0:
-                    has_activity = True
-
-                # Check for reviews on this date if we have review records
-                if not has_activity:
-                    cursor.execute(
-                        "SELECT name FROM sqlite_master WHERE type='table' AND name='review_sessions'"
-                    )
-                    if cursor.fetchone():
-                        cursor.execute(
-                            "SELECT COUNT(*) FROM review_sessions WHERE session_date LIKE ?",
-                            (f"{date_str}%",)
-                        )
-                        if cursor.fetchone()[0] > 0:
-                            has_activity = True
-                    else:
-                        # Fall back to last_review_date in words table
-                        cursor.execute(
-                            "SELECT COUNT(*) FROM pragma_table_info('words') WHERE name='last_review_date'"
-                        )
-                        if cursor.fetchone()[0] > 0:
-                            cursor.execute(
-                                "SELECT COUNT(*) FROM words WHERE last_review_date LIKE ?",
-                                (f"{date_str}%",)
-                            )
-                            if cursor.fetchone()[0] > 0:
-                                has_activity = True
+                # Check for any activity on this day
+                has_activity = self._check_day_has_activity(cursor, date_str)
 
                 # If no activity found for this day, streak ends
                 if not has_activity:
@@ -434,6 +440,43 @@ class RemindCommand(Command):
         except sqlite3.Error:
             # In case of database error, return 0 (no streak)
             return 0
+
+    def _check_day_has_activity(self, cursor, date_str):
+        """Check if a specific day has any learning activity."""
+        # Check for word additions on this date
+        cursor.execute(
+            "SELECT COUNT(*) FROM words WHERE date_added LIKE ?",
+            (f"{date_str}%",)
+        )
+        if cursor.fetchone()[0] > 0:
+            return True
+
+        # Check for reviews in review_sessions table if it exists
+        cursor.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='review_sessions'"
+        )
+        if cursor.fetchone():
+            cursor.execute(
+                "SELECT COUNT(*) FROM review_sessions WHERE session_date LIKE ?",
+                (f"{date_str}%",)
+            )
+            if cursor.fetchone()[0] > 0:
+                return True
+
+        # Check for reviews in last_review_date field if it exists
+        cursor.execute(
+            "SELECT COUNT(*) FROM pragma_table_info('words') WHERE name='last_review_date'"
+        )
+        if cursor.fetchone()[0] > 0:
+            cursor.execute(
+                "SELECT COUNT(*) FROM words WHERE last_review_date LIKE ?",
+                (f"{date_str}%",)
+            )
+            if cursor.fetchone()[0] > 0:
+                return True
+
+        # No activity found for this day
+        return False
 
     @staticmethod
     def get_latest_reminder():
@@ -547,7 +590,33 @@ class RemindCommand(Command):
                         return None
             return None
         except sqlite3.Error:
+            # In case of database error, return None
             return None
+
+    def _get_text(self, key, **kwargs):
+        """Get translated text from the language dictionary with placeholders filled."""
+        # Try to get text from the selected language
+        if key in self.TRANSLATIONS[self.lang]:
+            value = self.TRANSLATIONS[self.lang][key]
+        # Fall back to English if the key doesn't exist in the selected language
+        elif key in self.TRANSLATIONS["en"]:
+            value = self.TRANSLATIONS["en"][key]
+        else:
+            return f"Missing text key: {key}"
+
+        # If the value is a list, pick a random item
+        if isinstance(value, list):
+            value = random.choice(value)
+
+        # Fill in any placeholders
+        if kwargs:
+            try:
+                value = value.format(**kwargs)
+            except KeyError:
+                # Just return the original string if placeholders don't match
+                pass
+
+        return value
 
     def _format_goal_progress(self, words_added_today, daily_goal):
         """Format the goal progress message if a goal is set."""
@@ -563,19 +632,50 @@ class RemindCommand(Command):
             return self._get_text("goal_progress", words_added=words_added_today,
                                   daily_goal=daily_goal, percentage=percentage)
 
+    def _get_activity_message(self, words_added, reviews_done):
+        """Get the appropriate activity message based on what the user has done."""
+        if words_added > 0 and reviews_done > 0:
+            return self._get_text("activity_added_reviewed",
+                                  words_added=words_added, reviews_done=reviews_done)
+        elif words_added > 0:
+            return self._get_text("activity_added", words_added=words_added)
+        elif reviews_done > 0:
+            return self._get_text("activity_reviewed", reviews_done=reviews_done)
+        return ""
+
+    def _get_suggestion_message(self, message_type, time_of_day=None):
+        """Get the appropriate suggestion message based on message type and time."""
+        if message_type == "streak_risk":
+            # Streak-specific suggestions
+            if time_of_day == "morning":
+                return self._get_text("streak_suggestion_morning")
+            elif time_of_day == "evening":
+                return self._get_text("streak_suggestion_evening")
+            else:
+                return self._get_text("streak_suggestion_default")
+        elif message_type in ["reminder", "forced_reminder"]:
+            # Regular reminder suggestions
+            if time_of_day == "morning":
+                return self._get_text("reminder_suggestion_morning")
+            elif time_of_day == "evening":
+                return self._get_text("reminder_suggestion_evening")
+            else:
+                return self._get_text("reminder_suggestion_default")
+        else:
+            # Positive message suggestions
+            if time_of_day == "morning":
+                return self._get_text("suggestion_morning")
+            elif time_of_day == "evening":
+                return self._get_text("suggestion_evening")
+            else:
+                return self._get_text("suggestion_default")
+
     def _show_streak_at_risk_message(self, streak_length, time_of_day=None, daily_goal=None, custom_message=None):
         """Display a reminder focusing on the streak being at risk."""
-        # Determine the main message (custom or default)
-        if custom_message:
-            main_message = f"✨ {custom_message}"
-        else:
-            # Get the streak message with the streak length formatted in
-            main_message = "⚠️ " + self._get_text("streak_risk", streak_length=streak_length)
+        # Build the main message
+        main_message = self._build_main_message("streak_risk", custom_message, streak_length=streak_length)
 
-        # Print the main message
-        print(f"\n{main_message}")
-
-        # Build the full message for logging
+        # Print and build the full message for logging
         full_message = main_message
 
         # Add goal progress if a goal is set
@@ -584,60 +684,74 @@ class RemindCommand(Command):
             print(goal_message)
             full_message += goal_message
 
-        # Add contextual suggestions based on time of day
-        if time_of_day == "morning":
-            suggestion_message = self._get_text("streak_suggestion_morning")
-        elif time_of_day == "evening":
-            suggestion_message = self._get_text("streak_suggestion_evening")
-        else:
-            suggestion_message = self._get_text("streak_suggestion_default")
-
+        # Add contextual suggestions
+        suggestion_message = self._get_suggestion_message("streak_risk", time_of_day)
         print(f"{suggestion_message}\n")
-        full_message += f"{suggestion_message}"
+        full_message += suggestion_message
 
         return full_message
+
+    def _build_main_message(self, message_type, custom_message=None, **kwargs):
+        """Build the main message with appropriate translations and formatting."""
+        if custom_message:
+            # Use custom message with the custom icon
+            main_message = f"{self.ICONS['custom']} {custom_message}"
+        else:
+            # Get the appropriate message based on type and time
+            if message_type.startswith("forced_"):
+                # Handle forced messages
+                base_type = message_type.replace("forced_", "")
+                message = self._get_message_text(base_type, **kwargs)
+                forced_suffix = self._get_text("forced_reminder_suffix")
+                main_message = f"{self.ICONS['forced']} {message} {forced_suffix}"
+            else:
+                # Normal messages
+                message = self._get_message_text(message_type, **kwargs)
+                main_message = f"{self.ICONS[message_type]} {message}"
+
+        # Print the message with a newline before it
+        print(f"\n{main_message}")
+        return main_message
+
+    def _get_message_text(self, message_type, **kwargs):
+        """Get the appropriate message text based on type and any provided context."""
+        if message_type == "positive":
+            # Select positive message based on time of day
+            time_of_day = kwargs.get('time_of_day')
+            if time_of_day == "morning":
+                return self._get_text("positive_morning")
+            elif time_of_day == "evening":
+                return self._get_text("positive_evening")
+            else:
+                return self._get_text("positive_default")
+        elif message_type == "reminder":
+            # Select reminder message based on time of day
+            time_of_day = kwargs.get('time_of_day')
+            if time_of_day == "morning":
+                return self._get_text("reminder_morning")
+            elif time_of_day == "evening":
+                return self._get_text("reminder_evening")
+            else:
+                return self._get_text("reminder_default")
+        elif message_type == "streak_risk":
+            # Get streak risk message with streak length
+            streak_length = kwargs.get('streak_length', 0)
+            return self._get_text("streak_risk", streak_length=streak_length)
+        # Add more types as needed
+        return "Unknown message type"
 
     def _show_positive_message(self, words_added, reviews_done, time_of_day=None, daily_goal=None, custom_message=None,
                                forced=False):
         """Display a positive reinforcement message, optionally customized."""
-        # Determine the main message (custom or default)
-        if custom_message:
-            main_message = f"✨ {custom_message}"
-        else:
-            # Select the appropriate message category based on time of day
-            if time_of_day == "morning":
-                message_type = "positive_morning"
-            elif time_of_day == "evening":
-                message_type = "positive_evening"
-            else:
-                message_type = "positive_default"
+        # Build the main message
+        message_type = "forced_positive" if forced else "positive"
+        main_message = self._build_main_message(message_type, custom_message, time_of_day=time_of_day)
 
-            # Get a random message from the appropriate category
-            message = self._get_text(message_type)
-
-            # Add forced indicator if applicable
-            if forced:
-                forced_suffix = self._get_text("forced_reminder_suffix")
-                main_message = f"🔔 {message} {forced_suffix}"
-            else:
-                main_message = f"🎉 {message}"
-
-        # Print the main message
-        print(f"\n{main_message}")
-
-        # Build the full message for logging
+        # Start building the full message for logging
         full_message = main_message
 
         # Add activity details
-        activity_message = ""
-        if words_added > 0 and reviews_done > 0:
-            activity_message = self._get_text("activity_added_reviewed",
-                                              words_added=words_added, reviews_done=reviews_done)
-        elif words_added > 0:
-            activity_message = self._get_text("activity_added", words_added=words_added)
-        elif reviews_done > 0:
-            activity_message = self._get_text("activity_reviewed", reviews_done=reviews_done)
-
+        activity_message = self._get_activity_message(words_added, reviews_done)
         if activity_message:
             print(activity_message)
             full_message += f"\n{activity_message}"
@@ -648,14 +762,8 @@ class RemindCommand(Command):
             print(goal_message)
             full_message += goal_message
 
-        # Add a suggestion based on time of day
-        if time_of_day == "morning":
-            suggestion_message = self._get_text("suggestion_morning")
-        elif time_of_day == "evening":
-            suggestion_message = self._get_text("suggestion_evening")
-        else:
-            suggestion_message = self._get_text("suggestion_default")
-
+        # Add appropriate suggestion
+        suggestion_message = self._get_suggestion_message(message_type, time_of_day)
         print(f"{suggestion_message}\n")
         full_message += f"{suggestion_message}"
 
@@ -663,32 +771,11 @@ class RemindCommand(Command):
 
     def _show_reminder_message(self, time_of_day=None, daily_goal=None, custom_message=None, forced=False):
         """Display a motivational reminder message, optionally customized."""
-        # Determine the main message (custom or default)
-        if custom_message:
-            main_message = f"✨ {custom_message}"
-        else:
-            # Select the appropriate message category based on time of day
-            if time_of_day == "morning":
-                message_type = "reminder_morning"
-            elif time_of_day == "evening":
-                message_type = "reminder_evening"
-            else:
-                message_type = "reminder_default"
+        # Build the main message
+        message_type = "forced_reminder" if forced else "reminder"
+        main_message = self._build_main_message(message_type, custom_message, time_of_day=time_of_day)
 
-            # Get a random message from the appropriate category
-            message = self._get_text(message_type)
-
-            # Add forced indicator if applicable
-            if forced:
-                forced_suffix = self._get_text("forced_reminder_suffix")
-                main_message = f"🔔 {message} {forced_suffix}"
-            else:
-                main_message = f"⏰ {message}"
-
-        # Print the main message
-        print(f"\n{main_message}")
-
-        # Build the full message for logging
+        # Start building the full message for logging
         full_message = main_message
 
         # Add goal progress if a goal is set
@@ -697,14 +784,8 @@ class RemindCommand(Command):
             print(goal_message)
             full_message += goal_message
 
-        # Add contextual suggestions based on time of day
-        if time_of_day == "morning":
-            suggestion_message = self._get_text("reminder_suggestion_morning")
-        elif time_of_day == "evening":
-            suggestion_message = self._get_text("reminder_suggestion_evening")
-        else:
-            suggestion_message = self._get_text("reminder_suggestion_default")
-
+        # Add appropriate suggestion
+        suggestion_message = self._get_suggestion_message(message_type, time_of_day)
         print(f"{suggestion_message}\n")
         full_message += f"{suggestion_message}"
 
