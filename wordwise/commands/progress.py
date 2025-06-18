@@ -58,6 +58,9 @@ class ProgressCommand(Command):
                     progress_msg += " No daily goal set. Use set-goal to configure one."
                 elif words_today >= daily_goal:
                     progress_msg = f"Goal met! {progress_msg}"
+                elif daily_goal - words_today == 1:
+                    # Special encouraging message when user is just 1 word away from their goal
+                    progress_msg += f" Almost there! Just 1 more word to reach your goal!"
                 else:
                     progress_msg += f" Your daily goal is {daily_goal}. Keep going!"
 
