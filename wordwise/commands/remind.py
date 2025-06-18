@@ -34,14 +34,13 @@ class RemindCommand(Command):
 
     def execute(self, args):
         # Get the DB path - using the same approach as other commands
-        db_dir = os.path.join(os.path.expanduser("~"), ".wordwise")
-        os.makedirs(db_dir, exist_ok=True)
-        db_path = os.path.join(db_dir, "words.db")
-
         conn = None
         try:
             conn = get_connection()
             cursor = conn.cursor()
+
+            # Ensure the reminder_history table exists
+            self._ensure_reminder_history_table(cursor)
 
             # Get today's date in ISO format for comparison
             today = datetime.datetime.now().date().isoformat()
@@ -87,12 +86,20 @@ class RemindCommand(Command):
             # Determine user activity status for today
             has_activity_today = words_added_today > 0 or reviews_today > 0
 
-            # Generate and display the appropriate message
+            # Generate and display the appropriate message, and log it
             if has_activity_today:
-                self._show_positive_message(words_added_today, reviews_today, args.time, daily_goal,
-                                            args.custom_message)
+                message = self._show_positive_message(
+                    words_added_today, reviews_today, args.time, daily_goal, args.custom_message
+                )
+                self._log_reminder(cursor, "positive", message)
             else:
-                self._show_reminder_message(args.time, daily_goal, args.custom_message)
+                message = self._show_reminder_message(
+                    args.time, daily_goal, args.custom_message
+                )
+                self._log_reminder(cursor, "reminder", message)
+
+            # Commit the transaction to save the reminder log
+            conn.commit()
 
         except sqlite3.Error as e:
             print(f"Database error: {e}")
@@ -101,6 +108,25 @@ class RemindCommand(Command):
         finally:
             if conn:
                 conn.close()
+
+    def _ensure_reminder_history_table(self, cursor):
+        """Create the reminder_history table if it doesn't exist."""
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS reminder_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL,
+                type TEXT NOT NULL,
+                message_text TEXT NOT NULL
+            )
+        ''')
+
+    def _log_reminder(self, cursor, reminder_type, message_text):
+        """Log the reminder to the reminder_history table."""
+        timestamp = datetime.datetime.now().isoformat()
+        cursor.execute(
+            "INSERT INTO reminder_history (timestamp, type, message_text) VALUES (?, ?, ?)",
+            (timestamp, reminder_type, message_text)
+        )
 
     def _get_daily_word_goal(self, cursor):
         """Retrieve the user's daily word goal from settings table."""
@@ -138,9 +164,9 @@ class RemindCommand(Command):
 
     def _show_positive_message(self, words_added, reviews_done, time_of_day=None, daily_goal=None, custom_message=None):
         """Display a positive reinforcement message, optionally customized."""
-        # Print the main message (custom or default)
+        # Determine the main message (custom or default)
         if custom_message:
-            print(f"\n✨ {custom_message}")
+            main_message = f"✨ {custom_message}"
         else:
             if time_of_day == "morning":
                 positive_messages = [
@@ -170,34 +196,52 @@ class RemindCommand(Command):
 
             # Choose a random positive message
             message = random.choice(positive_messages)
-            print("\n🎉 " + message)
+            main_message = f"🎉 {message}"
 
-        # Always show activity details regardless of custom message
+        # Print the main message
+        print(f"\n{main_message}")
+
+        # Build the full message for logging
+        full_message = main_message
+
+        # Add activity details
+        activity_message = ""
         if words_added > 0 and reviews_done > 0:
-            print(f"Today you've added {words_added} new word(s) and completed {reviews_done} review(s).")
+            activity_message = f"Today you've added {words_added} new word(s) and completed {reviews_done} review(s)."
         elif words_added > 0:
-            print(f"Today you've added {words_added} new word(s) to your collection.")
+            activity_message = f"Today you've added {words_added} new word(s) to your collection."
         elif reviews_done > 0:
-            print(f"Today you've reviewed {reviews_done} word(s) in your collection.")
+            activity_message = f"Today you've reviewed {reviews_done} word(s) in your collection."
+
+        if activity_message:
+            print(activity_message)
+            full_message += f"\n{activity_message}"
 
         # Add goal progress if a goal is set
         if daily_goal:
-            print(self._format_goal_progress(words_added, daily_goal))
+            goal_message = self._format_goal_progress(words_added, daily_goal)
+            print(goal_message)
+            full_message += goal_message
 
-        # Add a suggestion for continued practice based on time of day
+        # Add a suggestion based on time of day
+        suggestion_message = ""
         if time_of_day == "morning":
-            print("\nConsider scheduling another review session later today to reinforce your learning!\n")
+            suggestion_message = "\nConsider scheduling another review session later today to reinforce your learning!"
         elif time_of_day == "evening":
-            print(
-                "\nGreat job completing your practice today. Plan tomorrow's learning session for continued progress!\n")
+            suggestion_message = "\nGreat job completing your practice today. Plan tomorrow's learning session for continued progress!"
         else:
-            print("\nConsider doing more reviews or adding new words to enhance your learning!\n")
+            suggestion_message = "\nConsider doing more reviews or adding new words to enhance your learning!"
+
+        print(f"{suggestion_message}\n")
+        full_message += f"{suggestion_message}"
+
+        return full_message
 
     def _show_reminder_message(self, time_of_day=None, daily_goal=None, custom_message=None):
         """Display a motivational reminder message, optionally customized."""
-        # Print the main message (custom or default)
+        # Determine the main message (custom or default)
         if custom_message:
-            print(f"\n✨ {custom_message}")
+            main_message = f"✨ {custom_message}"
         else:
             if time_of_day == "morning":
                 reminder_messages = [
@@ -227,19 +271,33 @@ class RemindCommand(Command):
 
             # Choose a random reminder message
             message = random.choice(reminder_messages)
-            print("\n⏰ " + message)
+            main_message = f"⏰ {message}"
+
+        # Print the main message
+        print(f"\n{main_message}")
+
+        # Build the full message for logging
+        full_message = main_message
 
         # Add goal progress if a goal is set
         if daily_goal:
-            print(self._format_goal_progress(0, daily_goal))
+            goal_message = self._format_goal_progress(0, daily_goal)
+            print(goal_message)
+            full_message += goal_message
 
         # Add contextual suggestions based on time of day
+        suggestion_message = ""
         if time_of_day == "morning":
-            print("\nStarting with a review session improves retention throughout the day.")
-            print("Use 'wordwise review' to get your day off to a productive start.\n")
+            suggestion_message = "\nStarting with a review session improves retention throughout the day."
+            suggestion_message += "\nUse 'wordwise review' to get your day off to a productive start."
         elif time_of_day == "evening":
-            print("\nEvening review helps consolidate what you've learned during the day.")
-            print("Try 'wordwise review' for a relaxing but productive end to your day.\n")
+            suggestion_message = "\nEvening review helps consolidate what you've learned during the day."
+            suggestion_message += "\nTry 'wordwise review' for a relaxing but productive end to your day."
         else:
-            print("\nUse 'wordwise review' to practice your saved words.")
-            print("Or try 'wordwise lookup <word>' to explore and save new words.\n")
+            suggestion_message = "\nUse 'wordwise review' to practice your saved words."
+            suggestion_message += "\nOr try 'wordwise lookup <word>' to explore and save new words."
+
+        print(f"{suggestion_message}\n")
+        full_message += f"{suggestion_message}"
+
+        return full_message
