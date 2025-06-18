@@ -17,8 +17,97 @@ class ProgressCommand(Command):
         return "Show today's word learning progress and your current streak"
 
     def add_arguments(self, parser):
-        # No additional arguments needed
-        pass
+        # Add optional history argument
+        parser.add_argument(
+            "--history",
+            type=int,
+            help="Show progress history for the past N days",
+            metavar="N"
+        )
+
+    def _get_history_data(self, conn, days):
+        """Get progress history data for the specified number of days.
+
+        Args:
+            conn (sqlite3.Connection): Database connection
+            days (int): Number of days of history to retrieve
+
+        Returns:
+            list: List of dictionaries containing history data, one per day
+        """
+        cursor = conn.cursor()
+        today = datetime.date.today()
+        history_data = []
+
+        # Process each day
+        for i in range(days):
+            # Calculate the date for this history entry
+            date = today - datetime.timedelta(days=i)
+            date_str = date.isoformat()
+
+            # Get words saved on this date
+            cursor.execute(
+                "SELECT COUNT(*) FROM words WHERE date(date_added) = date(?)",
+                (date_str,)
+            )
+            words_saved = cursor.fetchone()[0]
+
+            # Get goal value for this date (assume same goal for all days)
+            daily_goal = get_goal_value(conn, "daily_word_goal")
+
+            # Get whether goal was met
+            cursor.execute(
+                "SELECT goal_met FROM streaks WHERE date = ?",
+                (date_str,)
+            )
+            goal_met_record = cursor.fetchone()
+            goal_met = goal_met_record[0] if goal_met_record else 'N/A'
+
+            # Calculate streak as of this date
+            previous_date = (date - datetime.timedelta(days=1)).isoformat()
+            streak_result = calculate_current_streak(conn, previous_date)
+            streak_count, _ = streak_result
+
+            # If goal was met on this day, add one to the streak
+            if goal_met_record and goal_met_record[0]:
+                streak_count += 1
+            elif goal_met_record and not goal_met_record[0]:
+                streak_count = 0
+
+            # Add entry to history data
+            history_data.append({
+                'date': date_str,
+                'words_saved': words_saved,
+                'goal': daily_goal if daily_goal is not None else 'N/A',
+                'goal_met': 'Yes' if goal_met_record and goal_met_record[0] else
+                ('No' if goal_met_record else 'N/A'),
+                'streak': streak_count
+            })
+
+        return history_data
+
+    def _print_history_table(self, history_data):
+        """Print history data in a tabular format.
+
+        Args:
+            history_data (list): List of dictionaries containing history data
+        """
+        if not history_data:
+            print("No history data available.")
+            return
+
+        # Print table header
+        print("\nProgress History:")
+        print("-" * 70)
+        print(f"{'Date':<12} | {'Words Saved':<11} | {'Goal':<6} | {'Goal Met':<8} | {'Streak':<6}")
+        print("-" * 70)
+
+        # Print table rows
+        for entry in history_data:
+            print(f"{entry['date']:<12} | {entry['words_saved']:<11} | {entry['goal']:<6} | "
+                  f"{entry['goal_met']:<8} | {entry['streak']:<6}")
+
+        print("-" * 70)
 
     def execute(self, args):
         conn = None
@@ -27,6 +116,14 @@ class ProgressCommand(Command):
             conn = get_connection()
             cursor = conn.cursor()
 
+            # If history flag is provided, show history data
+            if args.history and args.history > 0:
+                # Get and display history data
+                history_data = self._get_history_data(conn, args.history)
+                self._print_history_table(history_data)
+                return
+
+            # Otherwise, show regular progress view
             # Get today's date in ISO format (YYYY-MM-DD)
             today = datetime.date.today().isoformat()
 
