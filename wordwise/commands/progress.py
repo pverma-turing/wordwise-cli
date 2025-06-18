@@ -29,6 +29,11 @@ class ProgressCommand(Command):
             action="store_true",
             help="Calculate and display progress without updating the streaks database"
         )
+        parser.add_argument(
+            "--summary",
+            action="store_true",
+            help="Display an overall summary of learning progress and statistics"
+        )
 
     def _get_history_data(self, conn, days):
         """Get progress history data for the specified number of days.
@@ -91,6 +96,99 @@ class ProgressCommand(Command):
 
         return history_data
 
+    def _get_summary_data(self, conn):
+        """Get overall summary statistics of learning progress.
+
+        Args:
+            conn (sqlite3.Connection): Database connection
+
+        Returns:
+            dict: Dictionary containing summary statistics
+        """
+        cursor = conn.cursor()
+        summary = {}
+
+        # Get current daily goal
+        summary['current_goal'] = get_goal_value(conn, "daily_word_goal")
+
+        # Get total words saved
+        cursor.execute("SELECT COUNT(*) FROM words")
+        summary['total_words'] = cursor.fetchone()[0]
+
+        # Get number of days the goal was met
+        cursor.execute("SELECT COUNT(*) FROM streaks WHERE goal_met = 1")
+        summary['days_goal_met'] = cursor.fetchone()[0]
+
+        # Calculate current streak
+        today = datetime.date.today().isoformat()
+        yesterday = (datetime.date.today() - datetime.timedelta(days=1)).isoformat()
+        streak_result = calculate_current_streak(conn, yesterday)
+        current_streak, _ = streak_result
+
+        # Check if today's goal is met and add to streak if so
+        cursor.execute(
+            "SELECT COUNT(*) FROM words WHERE date(date_added) = date(?)",
+            (today,)
+        )
+        words_today = cursor.fetchone()[0]
+        if summary['current_goal'] is not None and words_today >= summary['current_goal']:
+            current_streak += 1
+
+        summary['current_streak'] = current_streak
+
+        # Find the longest streak
+        cursor.execute("SELECT date, goal_met FROM streaks ORDER BY date")
+        streak_records = cursor.fetchall()
+
+        longest_streak = 0
+        current_run = 0
+
+        for _, goal_met in streak_records:
+            if goal_met:
+                current_run += 1
+                longest_streak = max(longest_streak, current_run)
+            else:
+                current_run = 0
+
+        summary['longest_streak'] = max(longest_streak, current_streak)
+
+        return summary
+
+    def _print_summary(self, summary, conn):
+        """Print overall summary statistics.
+
+        Args:
+            summary (dict): Dictionary containing summary statistics
+            conn (sqlite3.Connection): Database connection
+        """
+        cursor = conn.cursor()
+        print("\nLearning Progress Summary:")
+        print("-" * 50)
+
+        # Current goal
+        if summary['current_goal'] is not None:
+            print(f"Current Daily Goal: {summary['current_goal']} words")
+        else:
+            print("Current Daily Goal: Not set")
+
+        # Streak information
+        print(f"Current Streak: {summary['current_streak']} day{'s' if summary['current_streak'] != 1 else ''}")
+        print(f"Longest Streak: {summary['longest_streak']} day{'s' if summary['longest_streak'] != 1 else ''}")
+
+        # Overall statistics
+        print(f"Total Words Saved: {summary['total_words']}")
+        print(f"Days Goal Met: {summary['days_goal_met']}")
+
+        # Calculate success rate if there are streak records
+        if summary['days_goal_met'] > 0:
+            cursor.execute("SELECT COUNT(*) FROM streaks")
+            total_days = cursor.fetchone()[0]
+            if total_days > 0:
+                success_rate = (summary['days_goal_met'] / total_days) * 100
+                print(f"Success Rate: {success_rate:.1f}%")
+
+        print("-" * 50)
+
     def _print_history_table(self, history_data):
         """Print history data in a tabular format.
 
@@ -120,6 +218,13 @@ class ProgressCommand(Command):
             # Connect to database
             conn = get_connection()
             cursor = conn.cursor()
+
+            # If summary flag is provided, show overall summary
+            if args.summary:
+                # Get and display summary data
+                summary_data = self._get_summary_data(conn)
+                self._print_summary(summary_data, conn)
+                return
 
             # If history flag is provided, show history data
             if args.history and args.history > 0:
