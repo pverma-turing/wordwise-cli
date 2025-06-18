@@ -12,3 +12,4 @@ from wordwise.commands.delete import DeleteCommand
 from wordwise.commands.set_goal import SetGoalCommand
 from wordwise.commands.get_goal import GetGoalCommand
 from wordwise.commands.progress import ProgressCommand
+from wordwise.commands.remind import RemindCommand
