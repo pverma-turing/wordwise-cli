@@ -19,8 +19,12 @@ class RemindCommand(Command):
         return "Check daily learning activity and provide motivational reminders"
 
     def add_arguments(self, parser):
-        # No additional arguments needed for this command
-        pass
+        # Add time argument that accepts either "morning" or "evening"
+        parser.add_argument(
+            "--time",
+            choices=["morning", "evening"],
+            help="Specify time of day for customized reminders"
+        )
 
     def execute(self, args):
         # Get the DB path - using the same approach as other commands
@@ -76,9 +80,9 @@ class RemindCommand(Command):
 
             # Generate and display the appropriate message
             if has_activity_today:
-                self._show_positive_message(words_added_today, reviews_today)
+                self._show_positive_message(words_added_today, reviews_today, args.time)
             else:
-                self._show_reminder_message()
+                self._show_reminder_message(args.time)
 
         except sqlite3.Error as e:
             print(f"Database error: {e}")
@@ -88,15 +92,33 @@ class RemindCommand(Command):
             if conn:
                 conn.close()
 
-    def _show_positive_message(self, words_added, reviews_done):
-        """Display a positive reinforcement message."""
-        positive_messages = [
-            "Great job! You've already practiced today.",
-            "Excellent work on your language learning today!",
-            "Keep up the good work! Your consistency is paying off.",
-            "Your dedication to learning is impressive!",
-            "You're on a roll! Your language skills are growing every day."
-        ]
+    def _show_positive_message(self, words_added, reviews_done, time_of_day=None):
+        """Display a positive reinforcement message, optionally customized for time of day."""
+        if time_of_day == "morning":
+            positive_messages = [
+                "Great start to your day with some language practice!",
+                "Morning practice sets a positive tone for the day!",
+                "Starting your day with learning shows great dedication!",
+                "Morning review sessions are a fantastic habit!",
+                "Your morning language practice is setting you up for success today."
+            ]
+        elif time_of_day == "evening":
+            positive_messages = [
+                "Excellent job fitting in language practice before the day ends!",
+                "Winding down your day with some learning - perfect!",
+                "Evening practice sessions are great for memory consolidation!",
+                "Great way to conclude your day with some language learning!",
+                "Your evening dedication to learning is impressive!"
+            ]
+        else:
+            # Default positive messages (no time specified)
+            positive_messages = [
+                "Great job! You've already practiced today.",
+                "Excellent work on your language learning today!",
+                "Keep up the good work! Your consistency is paying off.",
+                "Your dedication to learning is impressive!",
+                "You're on a roll! Your language skills are growing every day."
+            ]
 
         # Choose a random positive message
         message = random.choice(positive_messages)
@@ -110,21 +132,54 @@ class RemindCommand(Command):
         elif reviews_done > 0:
             print(f"Today you've reviewed {reviews_done} word(s) in your collection.")
 
-        # Add a suggestion for continued practice
-        print("Consider doing more reviews or adding new words to enhance your learning!\n")
+        # Add a suggestion for continued practice based on time of day
+        if time_of_day == "morning":
+            print("Consider scheduling another review session later today to reinforce your learning!\n")
+        elif time_of_day == "evening":
+            print(
+                "Great job completing your practice today. Plan tomorrow's learning session for continued progress!\n")
+        else:
+            print("Consider doing more reviews or adding new words to enhance your learning!\n")
 
-    def _show_reminder_message(self):
-        """Display a motivational reminder message."""
-        reminder_messages = [
-            "You haven't practiced today — take 5 minutes now to review your words!",
-            "A quick review session will help strengthen your memory. How about now?",
-            "Learning a little each day adds up! Take a moment to practice today.",
-            "Make progress on your language journey with just 5 minutes of practice today.",
-            "Consistency is key to language learning! Don't break your streak today."
-        ]
+    def _show_reminder_message(self, time_of_day=None):
+        """Display a motivational reminder message, optionally customized for time of day."""
+        if time_of_day == "morning":
+            reminder_messages = [
+                "Start your day with a quick review!",
+                "Morning is the perfect time to learn something new!",
+                "Kickstart your brain with some language practice this morning.",
+                "Begin your day with 5 minutes of vocabulary practice.",
+                "Morning vocabulary practice sets a positive tone for the day ahead."
+            ]
+        elif time_of_day == "evening":
+            reminder_messages = [
+                "Wind down your day by practicing your words.",
+                "Before the day ends, take a moment for language learning.",
+                "Evening is a great time to reinforce your vocabulary skills.",
+                "End your day on a productive note with a quick word review.",
+                "Round off your day with a few minutes of language practice."
+            ]
+        else:
+            # Default reminder messages (no time specified)
+            reminder_messages = [
+                "You haven't practiced today — take 5 minutes now to review your words!",
+                "A quick review session will help strengthen your memory. How about now?",
+                "Learning a little each day adds up! Take a moment to practice today.",
+                "Make progress on your language journey with just 5 minutes of practice today.",
+                "Consistency is key to language learning! Don't break your streak today."
+            ]
 
         # Choose a random reminder message
         message = random.choice(reminder_messages)
         print("\n⏰ " + message)
-        print("Use 'wordwise review' to practice your saved words.")
-        print("Or try 'wordwise lookup <word>' to explore and save new words.\n")
+
+        # Add contextual suggestions based on time of day
+        if time_of_day == "morning":
+            print("Starting with a review session improves retention throughout the day.")
+            print("Use 'wordwise review' to get your day off to a productive start.\n")
+        elif time_of_day == "evening":
+            print("Evening review helps consolidate what you've learned during the day.")
+            print("Try 'wordwise review' for a relaxing but productive end to your day.\n")
+        else:
+            print("Use 'wordwise review' to practice your saved words.")
+            print("Or try 'wordwise lookup <word>' to explore and save new words.\n")
