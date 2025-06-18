@@ -87,3 +87,49 @@ def delete_goal(conn, key):
         return True  # Deleted successfully
     else:
         return False  # No goal found
+
+
+def ensure_streaks_table(conn):
+    """Ensure the streaks table exists in the database."""
+    cursor = conn.cursor()
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS streaks (
+        date TEXT PRIMARY KEY,
+        goal_met BOOLEAN NOT NULL
+    )
+    ''')
+    conn.commit()
+
+
+def record_streak(conn, date, goal_met):
+    """Record whether the goal was met on a specific date.
+
+    Args:
+        conn (sqlite3.Connection): Database connection
+        date (str): Date in ISO format (YYYY-MM-DD)
+        goal_met (bool): Whether the goal was met
+
+    Returns:
+        bool: True if a new record was created, False if updated
+    """
+    ensure_streaks_table(conn)
+    cursor = conn.cursor()
+
+    # Check if a record for this date already exists
+    cursor.execute("SELECT goal_met FROM streaks WHERE date = ?", (date,))
+    existing = cursor.fetchone()
+
+    if existing:
+        cursor.execute(
+            "UPDATE streaks SET goal_met = ? WHERE date = ?",
+            (goal_met, date)
+        )
+        conn.commit()
+        return False  # Updated existing
+    else:
+        cursor.execute(
+            "INSERT INTO streaks (date, goal_met) VALUES (?, ?)",
+            (date, goal_met)
+        )
+        conn.commit()
+        return True  # Created new

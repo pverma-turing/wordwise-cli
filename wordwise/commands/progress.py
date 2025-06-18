@@ -3,7 +3,8 @@ import datetime
 from .base import Command
 from wordwise.data.database import get_connection
 from wordwise.registry import register_command
-from wordwise.utils.db_helpers import get_goal_value
+from wordwise.utils.db_helpers import get_goal_value, record_streak
+
 
 @register_command
 class ProgressCommand(Command):
@@ -39,7 +40,12 @@ class ProgressCommand(Command):
             # Get the daily goal
             daily_goal = get_goal_value(conn, "daily_word_goal")
 
-            # Generate appropriate message based on progress
+            # Determine if goal was met and record streak
+            if daily_goal is not None:
+                goal_met = words_today >= daily_goal
+                record_streak(conn, today, goal_met)
+
+            # Generate appropriate message based on progress (unchanged)
             if words_today == 0:
                 progress_msg = "You haven't saved any words today."
                 if daily_goal is not None:
