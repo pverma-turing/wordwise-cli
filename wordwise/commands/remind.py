@@ -37,6 +37,12 @@ class RemindCommand(Command):
             choices=["enable", "disable"],
             help="Configure whether to show reminders automatically on CLI startup"
         )
+        # Add argument for gentle nudge behavior
+        parser.add_argument(
+            "--gentle",
+            action="store_true",
+            help="Only show reminders when your streak is at risk (no reminder if already practiced or low streak)"
+        )
 
     def execute(self, args):
         # Get the DB path - using the same approach as other commands
@@ -99,8 +105,20 @@ class RemindCommand(Command):
             # Query 3: Get the user's daily word goal if set
             daily_goal = self._get_daily_word_goal(cursor)
 
+            # Query 4: Get the current streak information (if gentle mode is enabled)
+            streak_length = 0
+            if args.gentle:
+                streak_length = self._get_current_streak(cursor)
+
             # Determine user activity status for today
             has_activity_today = words_added_today > 0 or reviews_today > 0
+
+            # Check if we should show a reminder in gentle mode
+            if args.gentle and (has_activity_today or streak_length <= 1):
+                # In gentle mode, don't show anything if user has already practiced
+                # or if their streak is 0 or 1 day (not at risk)
+                print("No reminder needed - you're doing fine!")
+                return
 
             # Generate and display the appropriate message, and log it
             if has_activity_today:
@@ -109,10 +127,14 @@ class RemindCommand(Command):
                 )
                 self._log_reminder(cursor, "positive", message)
             else:
-                message = self._show_reminder_message(
-                    args.time, daily_goal, args.custom_message
-                )
-                self._log_reminder(cursor, "reminder", message)
+                # If in gentle mode and we got here, it means streak > 1 and no activity today
+                if args.gentle:
+                    message = self._show_streak_at_risk_message(streak_length, args.time, daily_goal,
+                                                                args.custom_message)
+                    self._log_reminder(cursor, "streak_risk", message)
+                else:
+                    message = self._show_reminder_message(args.time, daily_goal, args.custom_message)
+                    self._log_reminder(cursor, "reminder", message)
 
             # Commit the transaction to save the reminder log
             conn.commit()
@@ -124,6 +146,68 @@ class RemindCommand(Command):
         finally:
             if conn:
                 conn.close()
+
+    def _get_current_streak(self, cursor):
+        """Calculate the current learning streak from activity records."""
+        try:
+            # Initialize streak counter
+            streak_days = 0
+            current_date = datetime.datetime.now().date()
+
+            # Start checking from yesterday (since today is checked separately)
+            check_date = current_date - datetime.timedelta(days=1)
+
+            # We'll check up to 1000 days back to avoid infinite loops
+            # This is just a safety measure - practical streaks won't be this long
+            for _ in range(1000):
+                date_str = check_date.isoformat()
+                has_activity = False
+
+                # Check for word additions on this date
+                cursor.execute(
+                    "SELECT COUNT(*) FROM words WHERE date_added LIKE ?",
+                    (f"{date_str}%",)
+                )
+                if cursor.fetchone()[0] > 0:
+                    has_activity = True
+
+                # Check for reviews on this date if we have review records
+                if not has_activity:
+                    cursor.execute(
+                        "SELECT name FROM sqlite_master WHERE type='table' AND name='review_sessions'"
+                    )
+                    if cursor.fetchone():
+                        cursor.execute(
+                            "SELECT COUNT(*) FROM review_sessions WHERE session_date LIKE ?",
+                            (f"{date_str}%",)
+                        )
+                        if cursor.fetchone()[0] > 0:
+                            has_activity = True
+                    else:
+                        # Fall back to last_review_date in words table
+                        cursor.execute(
+                            "SELECT COUNT(*) FROM pragma_table_info('words') WHERE name='last_review_date'"
+                        )
+                        if cursor.fetchone()[0] > 0:
+                            cursor.execute(
+                                "SELECT COUNT(*) FROM words WHERE last_review_date LIKE ?",
+                                (f"{date_str}%",)
+                            )
+                            if cursor.fetchone()[0] > 0:
+                                has_activity = True
+
+                # If no activity found for this day, streak ends
+                if not has_activity:
+                    break
+
+                # Otherwise, increment streak and check previous day
+                streak_days += 1
+                check_date = check_date - datetime.timedelta(days=1)
+
+            return streak_days
+        except sqlite3.Error:
+            # In case of database error, return 0 (no streak)
+            return 0
 
     @staticmethod
     def get_latest_reminder():
@@ -250,6 +334,53 @@ class RemindCommand(Command):
             return f"\n🎯 Daily goal achieved! {words_added_today} of {daily_goal} words saved today ({percentage}%)."
         else:
             return f"\n🎯 Daily goal: {words_added_today} of {daily_goal} words saved today ({percentage}%)."
+
+    def _show_streak_at_risk_message(self, streak_length, time_of_day=None, daily_goal=None, custom_message=None):
+        """Display a reminder focusing on the streak being at risk."""
+        # Determine the main message (custom or default)
+        if custom_message:
+            main_message = f"✨ {custom_message}"
+        else:
+            # Special streak-focused messages
+            streak_messages = [
+                f"⚠️ Your {streak_length}-day learning streak is at risk! Take a moment to practice today.",
+                f"⚠️ Don't break your {streak_length}-day streak! A quick review session will keep it going.",
+                f"⚠️ Protect your {streak_length}-day learning streak with a quick practice session.",
+                f"⚠️ Just 5 minutes of practice will maintain your {streak_length}-day streak.",
+                f"⚠️ Keep your momentum going! Your {streak_length}-day streak needs attention today."
+            ]
+
+            # Choose a random streak message
+            main_message = random.choice(streak_messages)
+
+        # Print the main message
+        print(f"\n{main_message}")
+
+        # Build the full message for logging
+        full_message = main_message
+
+        # Add goal progress if a goal is set
+        if daily_goal:
+            goal_message = self._format_goal_progress(0, daily_goal)
+            print(goal_message)
+            full_message += goal_message
+
+        # Add contextual suggestions based on time of day
+        suggestion_message = ""
+        if time_of_day == "morning":
+            suggestion_message = "\nIt only takes a few minutes to maintain your streak."
+            suggestion_message += "\nUse 'wordwise review' to get your day off to a productive start and keep your streak alive.\n"
+        elif time_of_day == "evening":
+            suggestion_message = "\nThere's still time to maintain your progress before the day ends!"
+            suggestion_message += "\nTry 'wordwise review' for a quick session to preserve your streak.\n"
+        else:
+            suggestion_message = "\nMaintaining consistency is key to effective learning."
+            suggestion_message += "\nUse 'wordwise review' or 'wordwise lookup <word>' to keep your streak going.\n"
+
+        print(f"{suggestion_message}")
+        full_message += f"{suggestion_message}"
+
+        return full_message
 
     def _show_positive_message(self, words_added, reviews_done, time_of_day=None, daily_goal=None, custom_message=None):
         """Display a positive reinforcement message, optionally customized."""
