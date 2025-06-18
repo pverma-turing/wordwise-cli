@@ -24,6 +24,11 @@ class ProgressCommand(Command):
             help="Show progress history for the past N days",
             metavar="N"
         )
+        parser.add_argument(
+            "--dry-run",
+            action="store_true",
+            help="Calculate and display progress without updating the streaks database"
+        )
 
     def _get_history_data(self, conn, days):
         """Get progress history data for the specified number of days.
@@ -137,11 +142,16 @@ class ProgressCommand(Command):
             # Get the daily goal
             daily_goal = get_goal_value(conn, "daily_word_goal")
 
-            # Determine if goal was met and record streak
+            # Determine if goal was met and record streak (unless dry run)
             goal_met = False
             if daily_goal is not None:
                 goal_met = words_today >= daily_goal
-                record_streak(conn, today, goal_met)
+                if not args.dry_run:
+                    record_streak(conn, today, goal_met)
+                elif args.dry_run and goal_met:
+                    print("(Dry run: Would record goal as met)")
+                elif args.dry_run and not goal_met:
+                    print("(Dry run: Would record goal as not met)")
 
             # Generate progress message
             if words_today == 0:
