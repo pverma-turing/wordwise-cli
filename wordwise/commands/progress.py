@@ -3,7 +3,7 @@ import datetime
 from .base import Command
 from wordwise.data.database import get_connection
 from wordwise.registry import register_command
-from wordwise.utils.db_helpers import get_goal_value, record_streak
+from wordwise.utils.db_helpers import get_goal_value, record_streak, calculate_current_streak
 
 
 @register_command
@@ -14,7 +14,7 @@ class ProgressCommand(Command):
 
     @property
     def description(self):
-        return "Show today's word learning progress against your daily goal"
+        return "Show today's word learning progress and your current streak"
 
     def add_arguments(self, parser):
         # No additional arguments needed
@@ -41,11 +41,12 @@ class ProgressCommand(Command):
             daily_goal = get_goal_value(conn, "daily_word_goal")
 
             # Determine if goal was met and record streak
+            goal_met = False
             if daily_goal is not None:
                 goal_met = words_today >= daily_goal
                 record_streak(conn, today, goal_met)
 
-            # Generate appropriate message based on progress (unchanged)
+            # Generate progress message
             if words_today == 0:
                 progress_msg = "You haven't saved any words today."
                 if daily_goal is not None:
@@ -61,6 +62,27 @@ class ProgressCommand(Command):
                     progress_msg += f" Your daily goal is {daily_goal}. Keep going!"
 
             print(progress_msg)
+
+            # Display streak information if a goal is set
+            if daily_goal is None:
+                # Do not show streak information if no goal is set
+                pass
+            else:
+                # Calculate current streak (excluding today if today's result is not yet recorded)
+                yesterday = (datetime.date.today() - datetime.timedelta(days=1)).isoformat()
+                current_streak = calculate_current_streak(conn, yesterday)
+
+                # Update streak if today's goal was met
+                if goal_met:
+                    current_streak += 1
+
+                # Display streak information
+                if current_streak == 0:
+                    print("No streak yet. Keep going!")
+                elif current_streak == 1:
+                    print("Current streak: 1 day")
+                else:
+                    print(f"Current streak: {current_streak} days")
 
         except sqlite3.Error as e:
             print(f"Database error: {e}")

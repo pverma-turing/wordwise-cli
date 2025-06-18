@@ -1,5 +1,5 @@
 import sqlite3
-
+import datetime
 
 def ensure_goals_table(conn):
     """Ensure the goals table exists in the database."""
@@ -133,3 +133,60 @@ def record_streak(conn, date, goal_met):
         )
         conn.commit()
         return True  # Created new
+
+
+def calculate_current_streak(conn, today=None):
+    """Calculate the current streak of consecutive days where the goal was met.
+
+    Args:
+        conn (sqlite3.Connection): Database connection
+        today (str, optional): Today's date in ISO format. If None, today's date is used.
+
+    Returns:
+        int: Number of consecutive days the goal was met (0 if no streak).
+    """
+    if today is None:
+        today = datetime.date.today().isoformat()
+
+    ensure_streaks_table(conn)
+    cursor = conn.cursor()
+
+    # Get all streaks ordered by date in descending order (most recent first)
+    cursor.execute(
+        "SELECT date, goal_met FROM streaks WHERE date <= ? ORDER BY date DESC",
+        (today,)
+    )
+    streak_records = cursor.fetchall()
+
+    if not streak_records:
+        return 0  # No streaks recorded
+
+    # Calculate current streak (consecutive days with goal_met = True)
+    streak_count = 0
+    prev_date = None
+
+    for date_str, goal_met in streak_records:
+        # Convert string date to date object for comparison
+        current_date = datetime.datetime.strptime(date_str, "%Y-%m-%d").date()
+
+        # Handle the first record
+        if prev_date is None:
+            if goal_met:  # If the most recent record shows goal was met
+                streak_count = 1
+                prev_date = current_date
+            else:
+                return 0  # Most recent record shows goal was not met, no current streak
+            continue
+
+        # Calculate the expected date (one day before previous date)
+        expected_date = prev_date - datetime.timedelta(days=1)
+
+        # Check if this record is consecutive and goal was met
+        if current_date == expected_date and goal_met:
+            streak_count += 1
+            prev_date = current_date
+        else:
+            # Chain is broken
+            break
+
+    return streak_count
