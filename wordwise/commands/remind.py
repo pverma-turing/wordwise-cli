@@ -31,6 +31,12 @@ class RemindCommand(Command):
             type=str,
             help="Provide a custom message to display instead of the default motivational message"
         )
+        # Add argument for configuring startup reminders
+        parser.add_argument(
+            "--startup",
+            choices=["enable", "disable"],
+            help="Configure whether to show reminders automatically on CLI startup"
+        )
 
     def execute(self, args):
         # Get the DB path - using the same approach as other commands
@@ -39,8 +45,18 @@ class RemindCommand(Command):
             conn = get_connection()
             cursor = conn.cursor()
 
+            # Handle startup configuration if provided
+            if hasattr(args, 'startup') and args.startup:
+                self._configure_startup_reminder(cursor, args.startup == "enable")
+                conn.commit()
+                state = "enabled" if args.startup == "enable" else "disabled"
+                print(f"Automatic startup reminders {state}.")
+                return
+
             # Ensure the reminder_history table exists
             self._ensure_reminder_history_table(cursor)
+            # Ensure the settings table exists
+            self._ensure_settings_table(cursor)
 
             # Get today's date in ISO format for comparison
             today = datetime.datetime.now().date().isoformat()
@@ -108,6 +124,79 @@ class RemindCommand(Command):
         finally:
             if conn:
                 conn.close()
+
+    @staticmethod
+    def get_latest_reminder():
+        """
+        Retrieves the latest reminder from the database.
+        This method is intended to be called from the CLI entry point.
+
+        Returns:
+            str: The latest reminder message, or None if no reminders exist or if startup reminders are disabled
+        """
+        # Get the DB path
+        db_dir = os.path.join(os.path.expanduser("~"), ".wordwise")
+        db_path = os.path.join(db_dir, "words.db")
+
+        # If the database doesn't exist yet, return None
+        if not os.path.exists(db_path):
+            return None
+
+        conn = None
+        try:
+            conn = sqlite3.connect(db_path)
+            cursor = conn.cursor()
+
+            # Check if startup reminders are enabled
+            cursor.execute(
+                "SELECT value FROM settings WHERE key = 'show_reminder_on_startup'"
+            )
+            result = cursor.fetchone()
+            if not result or result[0].lower() != 'true':
+                return None
+
+            # Check if the reminder_history table exists
+            cursor.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='reminder_history'"
+            )
+            if not cursor.fetchone():
+                return None
+
+            # Get the latest reminder
+            cursor.execute(
+                "SELECT message_text FROM reminder_history ORDER BY timestamp DESC LIMIT 1"
+            )
+            result = cursor.fetchone()
+
+            if result:
+                return result[0]
+            return None
+
+        except sqlite3.Error:
+            return None
+        finally:
+            if conn:
+                conn.close()
+
+    def _configure_startup_reminder(self, cursor, enable):
+        """Configure whether to show reminders on startup."""
+        self._ensure_settings_table(cursor)
+
+        # Set the show_reminder_on_startup setting
+        value = 'true' if enable else 'false'
+        cursor.execute(
+            "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
+            ('show_reminder_on_startup', value)
+        )
+
+    def _ensure_settings_table(self, cursor):
+        """Create the settings table if it doesn't exist."""
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS settings (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            )
+        ''')
 
     def _ensure_reminder_history_table(self, cursor):
         """Create the reminder_history table if it doesn't exist."""
