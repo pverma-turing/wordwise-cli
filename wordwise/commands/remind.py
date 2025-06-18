@@ -75,14 +75,17 @@ class RemindCommand(Command):
                 else:
                     reviews_today = 0
 
+            # Query 3: Get the user's daily word goal if set
+            daily_goal = self._get_daily_word_goal(cursor)
+
             # Determine user activity status for today
             has_activity_today = words_added_today > 0 or reviews_today > 0
 
             # Generate and display the appropriate message
             if has_activity_today:
-                self._show_positive_message(words_added_today, reviews_today, args.time)
+                self._show_positive_message(words_added_today, reviews_today, args.time, daily_goal)
             else:
-                self._show_reminder_message(args.time)
+                self._show_reminder_message(args.time, daily_goal)
 
         except sqlite3.Error as e:
             print(f"Database error: {e}")
@@ -92,7 +95,41 @@ class RemindCommand(Command):
             if conn:
                 conn.close()
 
-    def _show_positive_message(self, words_added, reviews_done, time_of_day=None):
+    def _get_daily_word_goal(self, cursor):
+        """Retrieve the user's daily word goal from settings table."""
+        try:
+            # Check if settings table exists
+            cursor.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='settings'"
+            )
+            if cursor.fetchone():
+                # If it exists, check for the daily_word_goal setting
+                cursor.execute(
+                    "SELECT value FROM settings WHERE key = 'daily_word_goal'"
+                )
+                result = cursor.fetchone()
+                if result:
+                    try:
+                        return int(result[0])
+                    except (ValueError, TypeError):
+                        return None
+            return None
+        except sqlite3.Error:
+            return None
+
+    def _format_goal_progress(self, words_added_today, daily_goal):
+        """Format the goal progress message if a goal is set."""
+        if daily_goal is None:
+            return ""
+
+        percentage = min(100, int((words_added_today / daily_goal) * 100))
+
+        if words_added_today >= daily_goal:
+            return f"\n🎯 Daily goal achieved! {words_added_today} of {daily_goal} words saved today ({percentage}%)."
+        else:
+            return f"\n🎯 Daily goal: {words_added_today} of {daily_goal} words saved today ({percentage}%)."
+
+    def _show_positive_message(self, words_added, reviews_done, time_of_day=None, daily_goal=None):
         """Display a positive reinforcement message, optionally customized for time of day."""
         if time_of_day == "morning":
             positive_messages = [
@@ -132,16 +169,20 @@ class RemindCommand(Command):
         elif reviews_done > 0:
             print(f"Today you've reviewed {reviews_done} word(s) in your collection.")
 
+        # Add goal progress if a goal is set
+        if daily_goal:
+            print(self._format_goal_progress(words_added, daily_goal))
+
         # Add a suggestion for continued practice based on time of day
         if time_of_day == "morning":
-            print("Consider scheduling another review session later today to reinforce your learning!\n")
+            print("\nConsider scheduling another review session later today to reinforce your learning!\n")
         elif time_of_day == "evening":
             print(
-                "Great job completing your practice today. Plan tomorrow's learning session for continued progress!\n")
+                "\nGreat job completing your practice today. Plan tomorrow's learning session for continued progress!\n")
         else:
-            print("Consider doing more reviews or adding new words to enhance your learning!\n")
+            print("\nConsider doing more reviews or adding new words to enhance your learning!\n")
 
-    def _show_reminder_message(self, time_of_day=None):
+    def _show_reminder_message(self, time_of_day=None, daily_goal=None):
         """Display a motivational reminder message, optionally customized for time of day."""
         if time_of_day == "morning":
             reminder_messages = [
@@ -173,13 +214,17 @@ class RemindCommand(Command):
         message = random.choice(reminder_messages)
         print("\n⏰ " + message)
 
+        # Add goal progress if a goal is set
+        if daily_goal:
+            print(self._format_goal_progress(0, daily_goal))
+
         # Add contextual suggestions based on time of day
         if time_of_day == "morning":
-            print("Starting with a review session improves retention throughout the day.")
+            print("\nStarting with a review session improves retention throughout the day.")
             print("Use 'wordwise review' to get your day off to a productive start.\n")
         elif time_of_day == "evening":
-            print("Evening review helps consolidate what you've learned during the day.")
+            print("\nEvening review helps consolidate what you've learned during the day.")
             print("Try 'wordwise review' for a relaxing but productive end to your day.\n")
         else:
-            print("Use 'wordwise review' to practice your saved words.")
+            print("\nUse 'wordwise review' to practice your saved words.")
             print("Or try 'wordwise lookup <word>' to explore and save new words.\n")
