@@ -143,10 +143,16 @@ def calculate_current_streak(conn, today=None):
         today (str, optional): Today's date in ISO format. If None, today's date is used.
 
     Returns:
-        int: Number of consecutive days the goal was met (0 if no streak).
+        tuple: (streak_count, streak_broken_reason)
+            - streak_count: Number of consecutive days the goal was met (0 if no streak)
+            - streak_broken_reason: None if streak is active, "missed_day" if a day was missed,
+              "goal_not_met" if the goal was not met on the most recent day
     """
     if today is None:
         today = datetime.date.today().isoformat()
+
+    # Convert today string to date object
+    today_date = datetime.datetime.strptime(today, "%Y-%m-%d").date()
 
     ensure_streaks_table(conn)
     cursor = conn.cursor()
@@ -159,34 +165,50 @@ def calculate_current_streak(conn, today=None):
     streak_records = cursor.fetchall()
 
     if not streak_records:
-        return 0  # No streaks recorded
+        return 0, None  # No streaks recorded
 
     # Calculate current streak (consecutive days with goal_met = True)
     streak_count = 0
     prev_date = None
+    streak_broken_reason = None
 
     for date_str, goal_met in streak_records:
         # Convert string date to date object for comparison
         current_date = datetime.datetime.strptime(date_str, "%Y-%m-%d").date()
 
-        # Handle the first record
+        # Handle the first record (most recent day)
         if prev_date is None:
-            if goal_met:  # If the most recent record shows goal was met
-                streak_count = 1
-                prev_date = current_date
-            else:
-                return 0  # Most recent record shows goal was not met, no current streak
+            # Check if the most recent record is for yesterday or earlier
+            days_gap = (today_date - current_date).days
+
+            # If the most recent record is more than 1 day old, the streak is broken
+            if days_gap > 1:
+                return 0, "missed_day"  # More than one day has passed since the last recorded day
+
+            # If the most recent record shows the goal wasn't met, streak is broken
+            if not goal_met:
+                return 0, "goal_not_met"  # Goal wasn't met on the most recent day
+
+            # Otherwise, start counting the streak
+            streak_count = 1
+            prev_date = current_date
             continue
 
-        # Calculate the expected date (one day before previous date)
+        # For subsequent records, calculate the expected date
         expected_date = prev_date - datetime.timedelta(days=1)
 
-        # Check if this record is consecutive and goal was met
-        if current_date == expected_date and goal_met:
-            streak_count += 1
-            prev_date = current_date
-        else:
-            # Chain is broken
+        # Check for gaps in dates (missed days)
+        if current_date != expected_date:
+            # There's a gap between records, so break the streak
             break
 
-    return streak_count
+        # Check if goal was met on this day
+        if not goal_met:
+            # Goal wasn't met, so break the streak
+            break
+
+        # If we get here, the day is consecutive and the goal was met
+        streak_count += 1
+        prev_date = current_date
+
+    return streak_count, streak_broken_reason

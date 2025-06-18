@@ -70,7 +70,8 @@ class ProgressCommand(Command):
             else:
                 # Calculate current streak (excluding today if today's result is not yet recorded)
                 yesterday = (datetime.date.today() - datetime.timedelta(days=1)).isoformat()
-                current_streak = calculate_current_streak(conn, yesterday)
+                streak_result = calculate_current_streak(conn, yesterday)
+                current_streak, streak_broken_reason = streak_result
 
                 # Update streak if today's goal was met
                 if goal_met:
@@ -78,7 +79,12 @@ class ProgressCommand(Command):
 
                 # Display streak information
                 if current_streak == 0:
-                    print("No streak yet. Keep going!")
+                    if streak_broken_reason == "missed_day":
+                        print("Current streak: 0 (you missed a day)")
+                    elif streak_broken_reason == "goal_not_met":
+                        print("Current streak: 0 (goal wasn't met yesterday)")
+                    else:
+                        print("No streak yet. Keep going!")
                 elif current_streak == 1:
                     print("Current streak: 1 day")
                 else:
