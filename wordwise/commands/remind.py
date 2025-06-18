@@ -43,6 +43,12 @@ class RemindCommand(Command):
             action="store_true",
             help="Only show reminders when your streak is at risk (no reminder if already practiced or low streak)"
         )
+        # Add argument to force reminder display
+        parser.add_argument(
+            "--force",
+            action="store_true",
+            help="Always show a reminder regardless of practice status or gentle mode setting"
+        )
 
     def execute(self, args):
         # Get the DB path - using the same approach as other commands
@@ -107,33 +113,62 @@ class RemindCommand(Command):
 
             # Query 4: Get the current streak information (if gentle mode is enabled)
             streak_length = 0
-            if args.gentle:
+            if args.gentle and not args.force:  # Only calculate streak if needed
                 streak_length = self._get_current_streak(cursor)
 
             # Determine user activity status for today
             has_activity_today = words_added_today > 0 or reviews_today > 0
 
             # Check if we should show a reminder in gentle mode
-            if args.gentle and (has_activity_today or streak_length <= 1):
+            if args.gentle and not args.force and (has_activity_today or streak_length <= 1):
                 # In gentle mode, don't show anything if user has already practiced
                 # or if their streak is 0 or 1 day (not at risk)
                 print("No reminder needed - you're doing fine!")
                 return
 
             # Generate and display the appropriate message, and log it
-            if has_activity_today:
+            # Note: with --force, we'll show a message regardless of activity status
+
+            if has_activity_today and not args.force:
+                # Normal positive message for active users (unless forced)
                 message = self._show_positive_message(
-                    words_added_today, reviews_today, args.time, daily_goal, args.custom_message
+                    words_added_today, reviews_done=reviews_today,
+                    time_of_day=args.time, daily_goal=daily_goal,
+                    custom_message=args.custom_message
                 )
                 self._log_reminder(cursor, "positive", message)
             else:
-                # If in gentle mode and we got here, it means streak > 1 and no activity today
-                if args.gentle:
-                    message = self._show_streak_at_risk_message(streak_length, args.time, daily_goal,
-                                                                args.custom_message)
-                    self._log_reminder(cursor, "streak_risk", message)
+                # If in gentle mode and streak > 1, or if force flag is used
+                if (args.gentle and streak_length > 1) or args.force:
+                    # Choose appropriate message type based on context
+                    if args.force and has_activity_today:
+                        # Force flag with activity - show positive but mark as forced
+                        message = self._show_positive_message(
+                            words_added_today, reviews_done=reviews_today,
+                            time_of_day=args.time, daily_goal=daily_goal,
+                            custom_message=args.custom_message, forced=True
+                        )
+                        self._log_reminder(cursor, "forced_positive", message)
+                    elif args.force:
+                        # Force flag without activity - show reminder but mark as forced
+                        message = self._show_reminder_message(
+                            time_of_day=args.time, daily_goal=daily_goal,
+                            custom_message=args.custom_message, forced=True
+                        )
+                        self._log_reminder(cursor, "forced_reminder", message)
+                    elif args.gentle:
+                        # Gentle mode with streak at risk
+                        message = self._show_streak_at_risk_message(
+                            streak_length, time_of_day=args.time,
+                            daily_goal=daily_goal, custom_message=args.custom_message
+                        )
+                        self._log_reminder(cursor, "streak_risk", message)
                 else:
-                    message = self._show_reminder_message(args.time, daily_goal, args.custom_message)
+                    # Standard reminder message
+                    message = self._show_reminder_message(
+                        time_of_day=args.time, daily_goal=daily_goal,
+                        custom_message=args.custom_message
+                    )
                     self._log_reminder(cursor, "reminder", message)
 
             # Commit the transaction to save the reminder log
@@ -382,7 +417,8 @@ class RemindCommand(Command):
 
         return full_message
 
-    def _show_positive_message(self, words_added, reviews_done, time_of_day=None, daily_goal=None, custom_message=None):
+    def _show_positive_message(self, words_added, reviews_done, time_of_day=None, daily_goal=None, custom_message=None,
+                               forced=False):
         """Display a positive reinforcement message, optionally customized."""
         # Determine the main message (custom or default)
         if custom_message:
@@ -416,7 +452,12 @@ class RemindCommand(Command):
 
             # Choose a random positive message
             message = random.choice(positive_messages)
-            main_message = f"🎉 {message}"
+
+            # Add forced indicator if applicable
+            if forced:
+                main_message = f"🔔 {message} (Forced reminder)"
+            else:
+                main_message = f"🎉 {message}"
 
         # Print the main message
         print(f"\n{main_message}")
@@ -457,7 +498,7 @@ class RemindCommand(Command):
 
         return full_message
 
-    def _show_reminder_message(self, time_of_day=None, daily_goal=None, custom_message=None):
+    def _show_reminder_message(self, time_of_day=None, daily_goal=None, custom_message=None, forced=False):
         """Display a motivational reminder message, optionally customized."""
         # Determine the main message (custom or default)
         if custom_message:
@@ -491,7 +532,12 @@ class RemindCommand(Command):
 
             # Choose a random reminder message
             message = random.choice(reminder_messages)
-            main_message = f"⏰ {message}"
+
+            # Add forced indicator if applicable
+            if forced:
+                main_message = f"🔔 {message} (Forced reminder)"
+            else:
+                main_message = f"⏰ {message}"
 
         # Print the main message
         print(f"\n{main_message}")
