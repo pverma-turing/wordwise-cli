@@ -6,6 +6,8 @@ CLI entry point for the WordWise application.
 
 import argparse
 import sys
+
+from wordwise.commands import RemindCommand
 from wordwise.config import COMMANDS
 from wordwise.version import __version__
 
@@ -66,6 +68,15 @@ def main():
     # If no command was provided and --version wasn't used, show help
     if not hasattr(args, 'command') or args.command is None:
         parser.print_help()
+        reminder_message = RemindCommand.get_latest_reminder()
+        if reminder_message:
+            # Display the startup header
+            print("\n===== WordWise Daily Reminder =====")
+            # Remove the leading newline since we're adding our own
+            if reminder_message.startswith('\n'):
+                reminder_message = reminder_message[1:]
+            print(reminder_message)
+            print("=================================\n")
         return 1
 
     # Get the command class and instantiate it
